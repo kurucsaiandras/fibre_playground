@@ -8,10 +8,9 @@ device = torch.device("cpu")  # TODO CPU is faster (?)
 print(f"Using device: {device}")
 
 # ------------------------
-# Ladder setup
+# Setup
 # ------------------------
 n_points = 50
-stick_length = 1.0
 vertical_spacing = 1.0
 
 # Initial centers (with a perturbation in the middle)
