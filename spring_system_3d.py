@@ -1,8 +1,9 @@
 import torch
-import matplotlib.pyplot as plt
 import math
 import torch.nn.functional as F
 import pyvista as pv
+import threading
+import time
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -168,50 +169,60 @@ def angle_between(p1, p2, p3, eps=1e-8):
 
 max_grad_norm = 1.0
 
-for step in range(5001):
-    optimizer.zero_grad()
+def optimize():
+    for step in range(5001):
+        optimizer.zero_grad()
 
-    # Linear loss (distances)
-    loss_linear = linearity_loss(fibres_params, spring_k_linear, spring_L_linear)
-    # Torsional loss (angles)
-    loss_torsion = torsional_loss(fibres_params, spring_k_torsional, spring_L_torsional)
-    # Boundary loss
-    loss_boundary = boundary_loss(fibres_params, domain_size, spring_k_boundary)
-    # Collision loss
-    loss_collision = collision_loss(fibres_params, spring_k_collision, fibre_diameter)
+        # Linear loss (distances)
+        loss_linear = linearity_loss(fibres_params, spring_k_linear, spring_L_linear)
+        # Torsional loss (angles)
+        loss_torsion = torsional_loss(fibres_params, spring_k_torsional, spring_L_torsional)
+        # Boundary loss
+        loss_boundary = boundary_loss(fibres_params, domain_size, spring_k_boundary)
+        # Collision loss
+        loss_collision = collision_loss(fibres_params, spring_k_collision, fibre_diameter)
 
-    loss_sum = loss_linear + loss_torsion + loss_boundary + loss_collision
+        loss_sum = loss_linear + loss_torsion + loss_boundary + loss_collision
 
-    # detect bad loss before backward
-    if not torch.isfinite(loss_sum):
-        print("Non-finite loss at step", step, "-> aborting")
-        break
+        # detect bad loss before backward
+        if not torch.isfinite(loss_sum):
+            print("Non-finite loss at step", step, "-> aborting")
+            break
 
-    loss_sum.backward()
+        loss_sum.backward()
 
-    # gradient clipping to avoid explosion
-    torch.nn.utils.clip_grad_norm_([fibres_params], max_grad_norm)
+        # gradient clipping to avoid explosion
+        torch.nn.utils.clip_grad_norm_([fibres_params], max_grad_norm)
 
-    optimizer.step()
+        optimizer.step()
 
-    # sanity check after step
-    if not torch.all(torch.isfinite(fibres_params)):
-        print("Parameters became non-finite at step", step, "-> aborting")
-        break
+        # sanity check after step
+        if not torch.all(torch.isfinite(fibres_params)):
+            print("Parameters became non-finite at step", step, "-> aborting")
+            break
 
-    if step % 100 == 0:
-        print(f"Step {step}: Overall Energy = {loss_sum.item():.6f}, "
-              f"Linear = {loss_linear.item():.6f}, "
-              f"Torsional = {loss_torsion.item():.6f}, "
-              f"Boundary = {loss_boundary.item():.6f}, "
-              f"Collision = {loss_collision.item():.6f}")
-        if to_plot:
-            # Update PyVista meshes
-            for i in range(n_fibres):
-                arr = fibres_params[i].detach().cpu().numpy()
-                new_line = pv.Spline(arr, n_points=resolution)
-                new_tube = new_line.tube(radius=fibre_diameter / 2.0)
-                meshes[i].points[:] = new_tube.points
-            plotter.update()   # refresh scene
+        if step % 100 == 0:
+            print(f"Step {step}: Overall Energy = {loss_sum.item():.6f}, "
+                f"Linear = {loss_linear.item():.6f}, "
+                f"Torsional = {loss_torsion.item():.6f}, "
+                f"Boundary = {loss_boundary.item():.6f}, "
+                f"Collision = {loss_collision.item():.6f}")
+            if to_plot:
+                # Update PyVista meshes
+                for i in range(n_fibres):
+                    arr = fibres_params[i].detach().cpu().numpy()
+                    new_line = pv.Spline(arr, n_points=resolution)
+                    new_tube = new_line.tube(radius=fibre_diameter / 2.0)
+                    meshes[i].points[:] = new_tube.points
 
-plotter.show(interactive_update=False)  
+if to_plot:
+    threading.Thread(target=optimize, daemon=True).start()
+    # call update in main thread until optimization is done
+    while True:
+        plotter.update()
+        time.sleep(0.05)
+        if not threading.main_thread().is_alive():
+            break
+    plotter.show(interactive_update=False)  
+else:
+    optimize()
