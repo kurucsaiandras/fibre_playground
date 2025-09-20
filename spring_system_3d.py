@@ -119,7 +119,7 @@ resolution = 20
 n_fibres = 200
 domain_size = 10
 angle_std_dev = 0.1
-fibre_diameter = 2
+fibre_diameter = 0.5
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, n_fibres, angle_std_dev)
 spring_k_linear = 5.0 # TODO tune based on the step length
@@ -131,24 +131,18 @@ spring_k_collision = 100.0
 to_plot = True
 
 if to_plot:
-    plt.ion()  # turn on interactive mode
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    plotter = pv.Plotter()
 
-    # Initial plot
-    plotted_fibres = []
-    for i in range(fibres.shape[0]):
+    # Build initial tube meshes and add to plotter, storing the PolyData objects
+    meshes = []
+    for i in range(n_fibres):
         arr = fibres[i].cpu().numpy()
-        line, = ax.plot(arr[:, 0], arr[:, 1], arr[:, 2])
-        plotted_fibres.append(line)
+        line = pv.Spline(arr, n_points=resolution)
+        tube = line.tube(radius=fibre_diameter / 2.0)
+        plotter.add_mesh(tube, color="lightsteelblue", smooth_shading=True)
+        meshes.append(tube)  # keep reference to update points
 
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.set_xlim(0, domain_size)
-    ax.set_ylim(0, domain_size)
-    ax.set_zlim(0, domain_size)
-    plt.pause(1)
+    plotter.show(auto_close=False, interactive_update=True)
 
 # Optimize for all fibres
 fibres_params = torch.nn.Parameter(fibres.clone())
@@ -212,12 +206,12 @@ for step in range(5001):
               f"Boundary = {loss_boundary.item():.6f}, "
               f"Collision = {loss_collision.item():.6f}")
         if to_plot:
-            for i, line in enumerate(plotted_fibres):
+            # Update PyVista meshes
+            for i in range(n_fibres):
                 arr = fibres_params[i].detach().cpu().numpy()
-                line.set_data(arr[:, 0], arr[:, 1])   # update x and y
-                line.set_3d_properties(arr[:, 2])     # update z
-            plt.pause(0.001)
+                new_line = pv.Spline(arr, n_points=resolution)
+                new_tube = new_line.tube(radius=fibre_diameter / 2.0)
+                meshes[i].points[:] = new_tube.points
+            plotter.update()   # refresh scene
 
-if to_plot:
-    plt.ioff()
-    plt.show()
+plotter.show(interactive_update=False)  
