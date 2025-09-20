@@ -65,7 +65,7 @@ def torsional_loss(points, k, L):
 def boundary_loss(points, domain_size, k):
     """
     points: (n_fibres, resolution, 3)
-    domain_size: scalar, specifying cubic domain [0, domain_size]^3
+    domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
     k: scalar
     """
     # lower violations: values < 0
@@ -78,16 +78,19 @@ def boundary_loss(points, domain_size, k):
     loss = loss.sum()  # sum over all points
     return loss
 
-def generate_fibres(domain_size, num_points, n_fibres, std_angle=0.1):
+def generate_fibres(domain_size, num_points, n_fibres, std_angle):
     """
     Generate n_fibres fibres in a cubic domain of given size.
+    domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
+    num_points: number of points per fibre
+    std_angle: standard deviation of angle perturbation from vertical (z) direction
     returns:
     - fibres: (n_fibres, num_points, 3) tensor of coordinates
     - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
     """
     # Random starting coordinates at z=0
-    x0 = torch.rand(n_fibres, 1, device=device) * domain_size
-    y0 = torch.rand(n_fibres, 1, device=device) * domain_size
+    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
+    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
     z0 = torch.zeros(n_fibres, 1, device=device)
     coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
@@ -99,7 +102,7 @@ def generate_fibres(domain_size, num_points, n_fibres, std_angle=0.1):
     dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
 
     # Calculate lengths until they hit the top (z = domain_size)
-    lengths = (domain_size - z0) / dirs[:, 2:3]  # (n_fibres, 1)
+    lengths = (domain_size[2] - z0) / dirs[:, 2:3]  # (n_fibres, 1)
     step_lengths = lengths / (num_points - 1)  # (n_fibres, 1)
 
     # Calculate step vectors
@@ -116,15 +119,21 @@ def generate_fibres(domain_size, num_points, n_fibres, std_angle=0.1):
 # ------------------------
 # Setup
 # ------------------------
-resolution = 20
+resolution = 30
 n_fibres = 200
-domain_size = 10
+domain_size = torch.tensor([10.0, 10.0, 10.0], device=device)
+domain_size_final = torch.tensor([8.0, 8.0, 10.0], device=device)
 angle_std_dev = 0.1
-fibre_diameter = 0.5
+fibre_diameter = 0.2
+fibre_diameter_final = 0.5
+n_iter = 50000
+
+# print fibre to volume ratio
+print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, n_fibres, angle_std_dev)
-spring_k_linear = 5.0 # TODO tune based on the step length
-spring_k_torsional = 1.0 # TODO tune based on the step length
+spring_k_linear = 0.1 # TODO tune based on the step length
+spring_k_torsional = 0.001 # TODO tune based on the step length
 spring_L_torsional = math.pi
 spring_k_boundary = 1.0
 spring_k_collision = 100.0
@@ -170,7 +179,8 @@ def angle_between(p1, p2, p3, eps=1e-8):
 max_grad_norm = 1.0
 
 def optimize():
-    for step in range(5001):
+    global fibre_diameter, domain_size
+    for step in range(n_iter+1):
         optimizer.zero_grad()
 
         # Linear loss (distances)
@@ -214,6 +224,20 @@ def optimize():
                     new_line = pv.Spline(arr, n_points=resolution)
                     new_tube = new_line.tube(radius=fibre_diameter / 2.0)
                     meshes[i].points[:] = new_tube.points
+            
+        # adjust configuration if no collisions
+        if loss_collision == 0:
+            # first, increase fibre diameter until target
+            if fibre_diameter < fibre_diameter_final:
+                fibre_diameter += 0.01
+                print(f"Increase fibre diameter to {fibre_diameter:.3f}")
+                print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
+            # then, decrease domain size until target
+            elif domain_size[0] > domain_size_final[0]:
+                domain_size[0] -= 0.1
+                domain_size[1] -= 0.1
+                print(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
+                print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
 
 if to_plot:
     threading.Thread(target=optimize, daemon=True).start()
