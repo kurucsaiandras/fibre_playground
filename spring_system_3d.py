@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import pyvista as pv
 import threading
 import time
+import poisson_disc as pd
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -78,9 +79,9 @@ def boundary_loss(points, domain_size, k):
     loss = loss.sum()  # sum over all points
     return loss
 
-def generate_fibres(domain_size, num_points, n_fibres, std_angle):
+def generate_fibres(domain_size, num_points, std_angle):
     """
-    Generate n_fibres fibres in a cubic domain of given size.
+    Generate fibres in a cubic domain of given size.
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
     num_points: number of points per fibre
     std_angle: standard deviation of angle perturbation from vertical (z) direction
@@ -89,10 +90,12 @@ def generate_fibres(domain_size, num_points, n_fibres, std_angle):
     - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
     """
     # Random starting coordinates at z=0
-    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
-    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
-    z0 = torch.zeros(n_fibres, 1, device=device)
-    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
+    # Generate Poisson disk samples (2D)
+    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=0.55, k=30)
+    samples = torch.tensor(samples, dtype=torch.float32, device=device)
+    n_fibres = samples.shape[0]
+    z0 = torch.zeros(samples.shape[0], 1, device=device)
+    coords0 = torch.cat([samples, z0], dim=1)  # (n_fibres, 3)
 
     # Base direction (0, 0, 1) with Gaussian perturbations in x/y
     dx = torch.randn(n_fibres, 1, device=device) * std_angle
@@ -119,19 +122,18 @@ def generate_fibres(domain_size, num_points, n_fibres, std_angle):
 # ------------------------
 # Setup
 # ------------------------
-resolution = 30
-n_fibres = 200
+resolution = 30 # TODO we need bigger number here to actually avoid collisions
+#n_fibres = 200
 domain_size = torch.tensor([10.0, 10.0, 10.0], device=device)
-domain_size_final = torch.tensor([8.0, 8.0, 10.0], device=device)
-angle_std_dev = 0.1
+domain_size_final = torch.tensor([7.0, 7.0, 10.0], device=device)
+angle_std_dev = 0.05
 fibre_diameter = 0.2
 fibre_diameter_final = 0.5
-n_iter = 50000
+n_iter = 500000
 
-# print fibre to volume ratio
+fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
+n_fibres = fibres.shape[0]
 print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
-
-fibres, spring_L_linear = generate_fibres(domain_size, resolution, n_fibres, angle_std_dev)
 spring_k_linear = 0.1 # TODO tune based on the step length
 spring_k_torsional = 0.001 # TODO tune based on the step length
 spring_L_torsional = math.pi
@@ -227,6 +229,8 @@ def optimize():
             
         # adjust configuration if no collisions
         if loss_collision == 0:
+            # save params
+            torch.save(fibres_params.data.cpu(), "fibre_coords.pt")
             # first, increase fibre diameter until target
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
@@ -236,8 +240,14 @@ def optimize():
             elif domain_size[0] > domain_size_final[0]:
                 domain_size[0] -= 0.1
                 domain_size[1] -= 0.1
+                # subtract 0.05 from x and y of points
+                fibres_params.data[:, :, 0] -= 0.05
+                fibres_params.data[:, :, 1] -= 0.05
                 print(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
                 print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
+            else:
+                print("Reached target configuration -> stopping")
+                break
 
 if to_plot:
     threading.Thread(target=optimize, daemon=True).start()
