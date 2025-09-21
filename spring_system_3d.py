@@ -13,22 +13,18 @@ print(f"Using device: {device}")
 def collision_loss(points, k, D):
     n_fibres, resolution, _ = points.shape
 
-    diff = points[:, :, None, None, :] - points[None, None, :, :, :]
-    dists = torch.linalg.norm(diff, dim=-1)
+    points_flat = points.view(-1, 3)  # shape (N, 3)
+    dists = torch.cdist(points_flat, points_flat, p=2)  # (N, N)
 
-    # mask: only between fibres
-    mask_diff_fibre = ~torch.eye(n_fibres, dtype=torch.bool, device=points.device)
-    mask_diff_fibre = mask_diff_fibre[:, None, :, None]
+    fibre_ids = torch.arange(n_fibres, device=points.device).repeat_interleave(resolution)
+    mask_diff_fibre = fibre_ids[:, None] != fibre_ids[None, :]
+    mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
+    mask_diff_fibre = mask_diff_fibre & mask_upper  # only consider i < j to avoid double counting
 
     # penalty = k * relu(D - dist)
-    penalties = 0.5 * k * F.relu(D - dists)**2 * mask_diff_fibre
+    penalties = 0.5 * k * F.relu(D - dists[mask_diff_fibre])**2
 
-    # keep only i < j (upper triangle in fibre–fibre matrix)
-    fibre_ids = torch.arange(n_fibres, device=points.device)
-    mask_upper = (fibre_ids[:, None] < fibre_ids[None, :])[:, None, :, None]
-    penalties = penalties * mask_upper
-
-    num_pairs = (penalties > 0).sum()
+    num_pairs = (penalties > 0).sum() # TODO Do we want to normalize?
     if num_pairs > 0:
         loss = penalties.sum() / num_pairs
     else:
@@ -90,7 +86,7 @@ def generate_fibres(domain_size, num_points, std_angle):
     """
     # Random starting coordinates at z=0
     # Generate Poisson disk samples (2D)
-    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=0.55, k=30)
+    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=0.35, k=30)
     samples = torch.tensor(samples, dtype=torch.float32, device=device)
     n_fibres = samples.shape[0]
     z0 = torch.zeros(samples.shape[0], 1, device=device)
@@ -121,13 +117,13 @@ def generate_fibres(domain_size, num_points, std_angle):
 # ------------------------
 # Setup
 # ------------------------
-resolution = 30 # TODO we need bigger number here to actually avoid collisions
+resolution = 50 # TODO we need bigger number here to actually avoid collisions
 #n_fibres = 200
 domain_size = torch.tensor([10.0, 10.0, 10.0], device=device)
-domain_size_final = torch.tensor([7.0, 7.0, 10.0], device=device)
+domain_size_final = torch.tensor([6.5, 6.5, 10.0], device=device)
 angle_std_dev = 0.05
-fibre_diameter = 0.2
-fibre_diameter_final = 0.5
+fibre_diameter = 0.05
+fibre_diameter_final = 0.3
 n_iter = 500000
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
@@ -208,7 +204,12 @@ def optimize():
 
         # save params if no collisions
         if loss_collision == 0:
+            fibre_to_volume_ratio = n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1])
             torch.save(fibres_params.data.cpu(), "fibre_coords.pt")
+            # write ratio and step number to file
+            with open("fibre_to_volume_ratio.txt", "a") as f:
+                f.write(f"step {step}\tratio {fibre_to_volume_ratio:.6f}\n")
+            print(f"Fibre to volume ratio: {fibre_to_volume_ratio:.3f}")
 
         optimizer.step()
 
@@ -237,7 +238,6 @@ def optimize():
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
                 print(f"Increase fibre diameter to {fibre_diameter:.3f}")
-                print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
             # then, decrease domain size until target
             elif domain_size[0] > domain_size_final[0]:
                 domain_size[0] -= 0.1
@@ -246,7 +246,6 @@ def optimize():
                 fibres_params.data[:, :, 0] -= 0.05
                 fibres_params.data[:, :, 1] -= 0.05
                 print(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
-                print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
             else:
                 print("Reached target configuration -> stopping")
                 break
