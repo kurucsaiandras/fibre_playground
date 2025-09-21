@@ -1,7 +1,6 @@
 import torch
 import math
 import torch.nn.functional as F
-import pyvista as pv
 import threading
 import time
 import poisson_disc as pd
@@ -140,9 +139,10 @@ spring_L_torsional = math.pi
 spring_k_boundary = 1.0
 spring_k_collision = 100.0
 
-to_plot = True
+to_plot = False
 
 if to_plot:
+    import pyvista as pv
     plotter = pv.Plotter()
 
     # Build initial tube meshes and add to plotter, storing the PolyData objects
@@ -206,6 +206,10 @@ def optimize():
         # gradient clipping to avoid explosion
         torch.nn.utils.clip_grad_norm_([fibres_params], max_grad_norm)
 
+        # save params if no collisions
+        if loss_collision == 0:
+            torch.save(fibres_params.data.cpu(), "fibre_coords.pt")
+
         optimizer.step()
 
         # sanity check after step
@@ -229,8 +233,6 @@ def optimize():
             
         # adjust configuration if no collisions
         if loss_collision == 0:
-            # save params
-            torch.save(fibres_params.data.cpu(), "fibre_coords.pt")
             # first, increase fibre diameter until target
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
