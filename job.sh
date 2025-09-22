@@ -3,7 +3,7 @@
 #BSUB -o fibre_sim%J.out
 #BSUB -q gpuv100
 #BSUB -n 4
-#BSUB -R "rusage[mem=3048]"
+#BSUB -R "rusage[mem=4096]"
 #BSUB -gpu "num=1:mode=shared"
 #BSUB -W 24:00
 

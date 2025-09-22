@@ -13,22 +13,35 @@ print(f"Using device: {device}")
 def collision_loss(points, k, D):
     n_fibres, resolution, _ = points.shape
 
-    points_flat = points.view(-1, 3)  # shape (N, 3)
-    dists = torch.cdist(points_flat, points_flat, p=2)  # (N, N)
+    # this computation is very memory wasting, but faster
+    if big_mem:
+        diff = points[:, :, None, None, :] - points[None, None, :, :, :]
+        dists = torch.linalg.norm(diff, dim=-1)
 
-    fibre_ids = torch.arange(n_fibres, device=points.device).repeat_interleave(resolution)
-    mask_diff_fibre = fibre_ids[:, None] != fibre_ids[None, :]
-    mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
-    mask_diff_fibre = mask_diff_fibre & mask_upper  # only consider i < j to avoid double counting
+        # mask: only between fibres
+        mask_diff_fibre = ~torch.eye(n_fibres, dtype=torch.bool, device=points.device)
+        mask_diff_fibre = mask_diff_fibre[:, None, :, None]
 
-    # penalty = k * relu(D - dist)
-    penalties = 0.5 * k * F.relu(D - dists[mask_diff_fibre])**2
+        # penalty = k * relu(D - dist)
+        penalties = 0.5 * k * F.relu(D - dists)**2 * mask_diff_fibre
 
-    num_pairs = (penalties > 0).sum() # TODO Do we want to normalize?
-    if num_pairs > 0:
-        loss = penalties.sum() / num_pairs
+        # keep only i < j (upper triangle in fibre–fibre matrix)
+        fibre_ids = torch.arange(n_fibres, device=points.device)
+        mask_upper = (fibre_ids[:, None] < fibre_ids[None, :])[:, None, :, None]
+        penalties = penalties * mask_upper
     else:
-        loss = torch.tensor(0.0, device=points.device)
+        points_flat = points.view(-1, 3)  # shape (N, 3)
+        dists = torch.cdist(points_flat, points_flat, p=2)  # (N, N)
+
+        fibre_ids = torch.arange(n_fibres, device=points.device).repeat_interleave(resolution)
+        mask_diff_fibre = fibre_ids[:, None] != fibre_ids[None, :]
+        mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
+        mask_diff_fibre = mask_diff_fibre & mask_upper  # only consider i < j to avoid double counting
+
+        # penalty = k * relu(D - dist)
+        penalties = 0.5 * k * F.relu(D - dists[mask_diff_fibre])**2
+
+    loss = penalties.sum()
 
     return loss
 
@@ -136,6 +149,7 @@ spring_k_boundary = 1.0
 spring_k_collision = 100.0
 
 to_plot = False
+big_mem = False
 
 if to_plot:
     import pyvista as pv
@@ -238,6 +252,8 @@ def optimize():
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
                 print(f"Increase fibre diameter to {fibre_diameter:.3f}")
+                with open("fibre_to_volume_ratio.txt", "a") as f:
+                    f.write(f"Increase fibre diameter to {fibre_diameter:.3f}")
             # then, decrease domain size until target
             elif domain_size[0] > domain_size_final[0]:
                 domain_size[0] -= 0.1
@@ -246,6 +262,8 @@ def optimize():
                 fibres_params.data[:, :, 0] -= 0.05
                 fibres_params.data[:, :, 1] -= 0.05
                 print(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
+                with open("fibre_to_volume_ratio.txt", "a") as f:
+                    f.write(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
             else:
                 print("Reached target configuration -> stopping")
                 break
