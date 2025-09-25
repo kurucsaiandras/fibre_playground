@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import threading
 import time
 import poisson_disc as pd
+import argparse
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -77,6 +78,7 @@ def boundary_loss(points, domain_size, k):
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
     k: scalar
     """
+    # TODO THIS DOESNT TAKE INTO ACCOUNT THE FIBRE RADIUS
     # lower violations: values < 0
     lower_violation = torch.clamp(-points, min=0.0)
     # upper violations: values > domain_size
@@ -141,15 +143,22 @@ n_iter = 500000
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
 n_fibres = fibres.shape[0]
-print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1]):.3f}")
+print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / ((domain_size[0]+fibre_diameter)*(domain_size[1]+fibre_diameter)):.3f}")
 spring_k_linear = 0.1 # TODO tune based on the step length
-spring_k_torsional = 0.001 # TODO tune based on the step length
+spring_k_torsional = 0.1 # TODO tune based on the step length
 spring_L_torsional = math.pi
 spring_k_boundary = 1.0
 spring_k_collision = 100.0
 
 to_plot = False
-big_mem = False
+big_mem = True
+
+# parse arg that specifies jobname
+jobname = "fibre_sim"
+parser = argparse.ArgumentParser(description="Fibre simulation")
+parser.add_argument("--jobname", type=str, nargs='?', default="fibre_sim", help="Job name for output files")
+args = parser.parse_args()
+jobname = args.jobname
 
 if to_plot:
     import pyvista as pv
@@ -218,10 +227,10 @@ def optimize():
 
         # save params if no collisions
         if loss_collision == 0:
-            fibre_to_volume_ratio = n_fibres * math.pi * (fibre_diameter/2)**2 / (domain_size[0]*domain_size[1])
-            torch.save(fibres_params.data.cpu(), "fibre_coords.pt")
+            fibre_to_volume_ratio = n_fibres * math.pi * (fibre_diameter/2)**2 / ((domain_size[0]+fibre_diameter)*(domain_size[1]+fibre_diameter))
+            torch.save(fibres_params.data.cpu(), f"coords_{jobname}.pt")
             # write ratio and step number to file
-            with open("fibre_to_volume_ratio.txt", "a") as f:
+            with open(f"volume_ratio_{jobname}.txt", "a") as f:
                 f.write(f"step {step}\tratio {fibre_to_volume_ratio:.6f}\n")
             print(f"Fibre to volume ratio: {fibre_to_volume_ratio:.3f}")
 
@@ -233,11 +242,14 @@ def optimize():
             break
 
         if step % 100 == 0:
-            print(f"Step {step}: Overall Energy = {loss_sum.item():.6f}, "
+            log_msg = (f"Step {step}: Overall Energy = {loss_sum.item():.6f}, "
                 f"Linear = {loss_linear.item():.6f}, "
                 f"Torsional = {loss_torsion.item():.6f}, "
                 f"Boundary = {loss_boundary.item():.6f}, "
                 f"Collision = {loss_collision.item():.6f}")
+            print(log_msg)
+            with open(f"loss_log_{jobname}.txt", "a") as f:
+                f.write(log_msg + '\n')
             if to_plot:
                 # Update PyVista meshes
                 for i in range(n_fibres):
@@ -252,8 +264,8 @@ def optimize():
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
                 print(f"Increase fibre diameter to {fibre_diameter:.3f}")
-                with open("fibre_to_volume_ratio.txt", "a") as f:
-                    f.write(f"Increase fibre diameter to {fibre_diameter:.3f}")
+                with open(f"volume_ratio_{jobname}.txt", "a") as f:
+                    f.write(f"Increase fibre diameter to {fibre_diameter:.3f}\n")
             # then, decrease domain size until target
             elif domain_size[0] > domain_size_final[0]:
                 domain_size[0] -= 0.1
@@ -261,9 +273,9 @@ def optimize():
                 # subtract 0.05 from x and y of points
                 fibres_params.data[:, :, 0] -= 0.05
                 fibres_params.data[:, :, 1] -= 0.05
-                print(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
-                with open("fibre_to_volume_ratio.txt", "a") as f:
-                    f.write(f"Decrease domain size to {domain_size[0]:.1f} x {domain_size[1]:.1f}")
+                print(f"Decrease domain size to {domain_size[0]:.3f} x {domain_size[1]:.3f}")
+                with open(f"volume_ratio_{jobname}.txt", "a") as f:
+                    f.write(f"Decrease domain size to {domain_size[0]:.3f} x {domain_size[1]:.3f}\n")
             else:
                 print("Reached target configuration -> stopping")
                 break

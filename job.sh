@@ -1,10 +1,14 @@
 #!/bin/bash
-#BSUB -J fibre_sim
-#BSUB -o fibre_sim%J.out
-#BSUB -q gpuv100
+
+# specify job name
+NAME="fibre_sim_prop_biglr"
+
+#BSUB -J fibre_sim_prop_biglr
+#BSUB -o fibre_sim_prop_biglr_%J.out
+#BSUB -q gpul40s
 #BSUB -n 4
-#BSUB -R "rusage[mem=4096]"
-#BSUB -gpu "num=1:mode=shared"
+#BSUB -R "rusage[mem=4GB]"
+#BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 
-python ./spring_system_3d.py
+python ./spring_system_3d.py --jobname $NAME
