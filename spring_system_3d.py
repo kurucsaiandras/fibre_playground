@@ -144,6 +144,7 @@ n_iter = 500000
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
 n_fibres = fibres.shape[0]
 print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / ((domain_size[0]+fibre_diameter)*(domain_size[1]+fibre_diameter)):.3f}")
+print(f"Number of fibres: {n_fibres}")
 spring_k_linear = 0.1 # TODO tune based on the step length
 spring_k_torsional = 0.1 # TODO tune based on the step length
 spring_L_torsional = math.pi

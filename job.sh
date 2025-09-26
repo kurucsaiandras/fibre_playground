@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # specify job name
-NAME="fibre_sim_prop_biglr"
+NAME="fibre_sim"
 
-#BSUB -J fibre_sim_prop_biglr
-#BSUB -o fibre_sim_prop_biglr_%J.out
+#BSUB -J fibre_sim
+#BSUB -o fibre_sim_%J.out
 #BSUB -q gpul40s
 #BSUB -n 4
 #BSUB -R "rusage[mem=4GB]"
