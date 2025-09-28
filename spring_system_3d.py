@@ -23,26 +23,21 @@ def collision_loss(points, k, D):
         mask_diff_fibre = ~torch.eye(n_fibres, dtype=torch.bool, device=points.device)
         mask_diff_fibre = mask_diff_fibre[:, None, :, None]
 
-        # penalty = k * relu(D - dist)
-        penalties = 0.5 * k * F.relu(D - dists)**2 * mask_diff_fibre
-
-        # keep only i < j (upper triangle in fibre–fibre matrix)
-        fibre_ids = torch.arange(n_fibres, device=points.device)
-        mask_upper = (fibre_ids[:, None] < fibre_ids[None, :])[:, None, :, None]
-        penalties = penalties * mask_upper
+        # penalty
+        d_l = F.relu(D - dists)
+        penalties = 0.5 * k * d_l*d_l * mask_diff_fibre
     else:
         points_flat = points.view(-1, 3)  # shape (N, 3)
         dists = torch.cdist(points_flat, points_flat, p=2)  # (N, N)
 
         fibre_ids = torch.arange(n_fibres, device=points.device).repeat_interleave(resolution)
         mask_diff_fibre = fibre_ids[:, None] != fibre_ids[None, :]
-        mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
-        mask_diff_fibre = mask_diff_fibre & mask_upper  # only consider i < j to avoid double counting
 
-        # penalty = k * relu(D - dist)
-        penalties = 0.5 * k * F.relu(D - dists[mask_diff_fibre])**2
+        # penalty
+        d_l = F.relu(D - dists[mask_diff_fibre])
+        penalties = 0.5 * k * d_l*d_l
 
-    loss = penalties.sum()
+    loss = penalties.sum() * 0.5  # each pair counted twice
 
     return loss
 
@@ -54,7 +49,8 @@ def linearity_loss(points, k, L):
     """
     diffs = points[:,:-1] - points[:,1:]      # (n_fibres, resolution-1, 3)
     dists = torch.norm(diffs, dim=2)    # (n_fibres, resolution-1)
-    loss = 0.5 * k * (dists - L) ** 2
+    d_l = dists - L
+    loss = 0.5 * k * d_l*d_l
     loss = loss.sum()
     return loss
 
@@ -68,7 +64,8 @@ def torsional_loss(points, k, L):
     p2 = points[:,1:-1]
     p3 = points[:,2:]
     angles = angle_between(p1, p2, p3)  # (n_fibres, resolution-2)
-    loss = 0.5 * k * (angles - L) ** 2
+    d_l = angles - L
+    loss = 0.5 * k * d_l*d_l
     loss = loss.sum()
     return loss
 
@@ -85,7 +82,7 @@ def boundary_loss(points, domain_size, k):
     upper_violation = torch.clamp(points - domain_size, min=0.0)
     # total violation per coordinate
     violations = lower_violation + upper_violation  # shape (n_fibres, resolution, 3)
-    loss = 0.5 * k * (violations ** 2).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)
+    loss = 0.5 * k * (violations*violations).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)
     loss = loss.sum()  # sum over all points
     return loss
 
@@ -139,7 +136,7 @@ domain_size_final = torch.tensor([6.5, 6.5, 10.0], device=device)
 angle_std_dev = 0.05
 fibre_diameter = 0.05
 fibre_diameter_final = 0.3
-n_iter = 500000
+n_iter = 100
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
 n_fibres = fibres.shape[0]
@@ -202,6 +199,8 @@ max_grad_norm = 1.0
 
 def optimize():
     global fibre_diameter, domain_size
+    # start timer
+    start_time = time.time()
     for step in range(n_iter+1):
         optimizer.zero_grad()
 
@@ -243,11 +242,13 @@ def optimize():
             break
 
         if step % 100 == 0:
+            elapsed = (time.time() - start_time) / 100
             log_msg = (f"Step {step}: Overall Energy = {loss_sum.item():.6f}, "
                 f"Linear = {loss_linear.item():.6f}, "
                 f"Torsional = {loss_torsion.item():.6f}, "
                 f"Boundary = {loss_boundary.item():.6f}, "
-                f"Collision = {loss_collision.item():.6f}")
+                f"Collision = {loss_collision.item():.6f}, "
+                f"Time/step = {elapsed:.3f}s")
             print(log_msg)
             with open(f"loss_log_{jobname}.txt", "a") as f:
                 f.write(log_msg + '\n')
@@ -258,6 +259,7 @@ def optimize():
                     new_line = pv.Spline(arr, n_points=resolution)
                     new_tube = new_line.tube(radius=fibre_diameter / 2.0)
                     meshes[i].points[:] = new_tube.points
+            start_time = time.time()
             
         # adjust configuration if no collisions
         if loss_collision == 0:
@@ -281,14 +283,18 @@ def optimize():
                 print("Reached target configuration -> stopping")
                 break
 
-if to_plot:
-    threading.Thread(target=optimize, daemon=True).start()
-    # call update in main thread until optimization is done
-    while True:
-        plotter.update()
-        time.sleep(0.05)
-        if not threading.main_thread().is_alive():
-            break
-    plotter.show(interactive_update=False)  
-else:
-    optimize()
+def main():
+    if to_plot:
+        threading.Thread(target=optimize, daemon=True).start()
+        # call update in main thread until optimization is done
+        while True:
+            plotter.update()
+            time.sleep(0.05)
+            if not threading.main_thread().is_alive():
+                break
+        plotter.show(interactive_update=False)  
+    else:
+        optimize()
+
+if __name__ == "__main__":
+    main()
