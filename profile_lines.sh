@@ -2,8 +2,8 @@
 
 # specify job name
 
-#BSUB -J profile_lines_new_nobigmem
-#BSUB -o profile_lines_new_nobigmem_%J.out
+#BSUB -J profile_lines
+#BSUB -o profile_lines_%J.out
 #BSUB -q gpul40s
 #BSUB -n 4
 #BSUB -R "rusage[mem=4GB]"

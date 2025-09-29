@@ -11,6 +11,58 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #device = torch.device("cpu")
 print(f"Using device: {device}")
 
+def get_bounding_boxes(points, radius):
+    """
+    points: (n_fibres, resolution, 3)
+    radius: scalar
+    returns: (n_fibres, 2, 3) tensor of bounding boxes: p_min, p_max
+    """
+    min_coords = points - radius
+    max_coords = points + radius
+    boxes = torch.stack([min_coords.min(dim=1).values, max_coords.max(dim=1).values], dim=1)
+    return boxes
+
+def get_bbox_intersections(boxes):
+    """
+    boxes: (n_fibres, 2, 3) tensor of bounding boxes: p_min, p_max
+    returns: (n_fibres, n_fibres) boolean tensor indicating which boxes intersect
+    """
+    n = boxes.shape[0]
+    p_min = boxes[:, 0, :]  # (n, 3)
+    p_max = boxes[:, 1, :]  # (n, 3)
+
+    # Expand dimensions for broadcasting
+    p_min_exp = p_min[:, None, :]  # (n, 1, 3)
+    p_max_exp = p_max[:, None, :]  # (n, 1, 3)
+
+    # Check for overlap in each dimension
+    overlap_x = (p_min_exp[:, :, 0] <= p_max_exp[:, :, 0].T) & (p_max_exp[:, :, 0] >= p_min_exp[:, :, 0].T)
+    overlap_y = (p_min_exp[:, :, 1] <= p_max_exp[:, :, 1].T) & (p_max_exp[:, :, 1] >= p_min_exp[:, :, 1].T)
+    overlap_z = (p_min_exp[:, :, 2] <= p_max_exp[:, :, 2].T) & (p_max_exp[:, :, 2] >= p_min_exp[:, :, 2].T)
+
+    # Boxes intersect if they overlap in all three dimensions
+    intersections = overlap_x & overlap_y & overlap_z
+
+    # remove double counting (i,j) and (j,i) and self-intersections
+    intersections = torch.triu(intersections, diagonal=1)
+
+    return intersections
+
+def fast_collision_loss(points, k, D):
+    boxes = get_bounding_boxes(points, D*0.5)
+    intersections = get_bbox_intersections(boxes)
+
+    i_idx, j_idx = intersections.nonzero(as_tuple=True)
+
+    dists = torch.norm(points[i_idx, :, None, :] - points[j_idx, None, :, :], dim=-1)
+
+    # penalty
+    d_l = F.relu(D - dists)
+    penalties = 0.5 * k * d_l*d_l
+
+    loss = penalties.sum()
+    return loss
+
 def collision_loss(points, k, D):
     n_fibres, resolution, _ = points.shape
 
@@ -136,7 +188,7 @@ domain_size_final = torch.tensor([6.5, 6.5, 10.0], device=device)
 angle_std_dev = 0.05
 fibre_diameter = 0.05
 fibre_diameter_final = 0.3
-n_iter = 100
+n_iter = 500000
 
 fibres, spring_L_linear = generate_fibres(domain_size, resolution, angle_std_dev)
 n_fibres = fibres.shape[0]
@@ -211,7 +263,7 @@ def optimize():
         # Boundary loss
         loss_boundary = boundary_loss(fibres_params, domain_size, spring_k_boundary)
         # Collision loss
-        loss_collision = collision_loss(fibres_params, spring_k_collision, fibre_diameter)
+        loss_collision = fast_collision_loss(fibres_params, spring_k_collision, fibre_diameter)
 
         loss_sum = loss_linear + loss_torsion + loss_boundary + loss_collision
 
