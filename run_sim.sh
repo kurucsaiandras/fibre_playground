@@ -11,4 +11,4 @@ NAME="fibre_sim"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 
-python ./spring_system_3d.py --jobname $NAME
+python ./fibre_sim.py --jobname $NAME
