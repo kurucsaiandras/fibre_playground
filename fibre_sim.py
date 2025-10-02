@@ -18,11 +18,12 @@ print(f"Using device: {device}")
 resolution = 50 # TODO we need bigger number here to actually avoid collisions
 #n_fibres = 200
 domain_size = torch.tensor([10.0, 10.0, 10.0], device=device)
-domain_size_final = torch.tensor([6.5, 6.5, 10.0], device=device)
+domain_size_final = torch.tensor([6.8, 6.8, 10.0], device=device)
 angle_std_dev = 0.05
 fibre_diameter = 0.05
 fibre_diameter_final = 0.3
 n_iter = 500000
+collision_loss_threshold = 0
 
 fibres, spring_L_linear = utils.generate_fibres(domain_size, resolution, angle_std_dev, device)
 n_fibres = fibres.shape[0]
@@ -69,7 +70,7 @@ optimizer = torch.optim.Adam([fibres_params], lr=1e-2)
 max_grad_norm = 1.0
 
 def optimize():
-    global fibre_diameter, domain_size
+    global fibre_diameter, domain_size, collision_loss_threshold
     # start timer
     start_time = time.time()
     global_start_time = start_time
@@ -98,7 +99,7 @@ def optimize():
         torch.nn.utils.clip_grad_norm_([fibres_params], max_grad_norm)
 
         # save params and log if no collisions or every 100 steps
-        if loss_collision == 0 or step % 100 == 0:
+        if loss_collision <= collision_loss_threshold or step % 100 == 0:
             if loss_collision == 0:
                 torch.save(fibres_params.data.cpu(), f"models/{jobname}.pt")
                 log_file_name = "model_saves"
@@ -128,13 +129,10 @@ def optimize():
             break
             
         # adjust configuration if no collisions
-        if loss_collision == 0:
+        if loss_collision <= collision_loss_threshold:
             # first, increase fibre diameter until target
             if fibre_diameter < fibre_diameter_final:
                 fibre_diameter += 0.01
-                print(f"Increase fibre diameter to {fibre_diameter:.3f}")
-                with open(f"volume_ratio_{jobname}.txt", "a") as f:
-                    f.write(f"Increase fibre diameter to {fibre_diameter:.3f}\n")
             # then, decrease domain size until target
             elif domain_size[0] > domain_size_final[0]:
                 domain_size[0] -= 0.1
@@ -142,12 +140,12 @@ def optimize():
                 # subtract 0.05 from x and y of points
                 fibres_params.data[:, :, 0] -= 0.05
                 fibres_params.data[:, :, 1] -= 0.05
-                print(f"Decrease domain size to {domain_size[0]:.3f} x {domain_size[1]:.3f}")
-                with open(f"volume_ratio_{jobname}.txt", "a") as f:
-                    f.write(f"Decrease domain size to {domain_size[0]:.3f} x {domain_size[1]:.3f}\n")
             else:
-                print("Reached target configuration -> stopping")
-                break
+                if collision_loss_threshold > 0:
+                    collision_loss_threshold = 0
+                else:
+                    print("Reached target configuration -> stopping")
+                    break
 
 def main():
     if to_plot:
