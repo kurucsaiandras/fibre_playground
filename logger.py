@@ -17,7 +17,7 @@ def log(jobname, filename, step, time, length, curvature, boundary, collision,
             / ((domain_size[0] + fibre_diameter) * (domain_size[1] + fibre_diameter)))
         f.write(
             f"{step},{time:.6f},{length:.6f},{curvature:.6f},"
-            f"{boundary:.6f},{collision:.6f},{total:.6f},{n_fibres},"
+            f"{boundary:.6f},{collision:.12f},{total:.6f},{n_fibres},"
             f"{fibre_diameter:.3f},{domain_size[0]:.3f},"
             f"{domain_size[1]:.3f},{domain_size[2]:.3f},{fibre_to_volume_ratio:.6f}\n"
         )

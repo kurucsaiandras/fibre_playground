@@ -90,7 +90,7 @@ fibres_params = torch.nn.Parameter(fibres.clone())
 if config.optimization.optimizer == 'adam':
     optimizer = torch.optim.Adam([fibres_params], lr=config.optimization.learning_rate)
 elif config.optimization.optimizer == 'lbfgs':
-    optimizer = torch.optim.LBFGS([fibres_params], lr=config.optimization.learning_rate, max_iter=20, history_size=100)
+    optimizer = torch.optim.LBFGS([fibres_params], lr=config.optimization.learning_rate, max_iter=10, history_size=10)
 
 # globals for logging
 last_losses = {}
@@ -119,7 +119,7 @@ def closure():
     last_losses["collision"] = loss_collision.detach()
 
     # save params if no collisions before updating the points
-    if loss_collision == 0:
+    if last_losses["collision"] <= config.evolution.collision_threshold:
         utils.save_model(jobname, fibres_params.data.cpu(),
                          current_step, time.time()-global_start_time,
                          domain_size_current, fibre_diameter_current)
@@ -148,7 +148,7 @@ def optimize():
 
         # save params and log if no collisions or every specified steps
         if loss_collision <= config.evolution.collision_threshold or step % config.stats.logging_freq == 0:
-            if loss_collision == 0:
+            if loss_collision <= config.evolution.collision_threshold:
                 log_file_name = "model_saves"
                 elapsed = (time.time() - global_start_time)
             elif step % config.stats.logging_freq == 0:
