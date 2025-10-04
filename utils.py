@@ -1,5 +1,6 @@
 import torch
 import poisson_disc as pd
+import os
 
 def get_bounding_boxes(points, radius):
     """
@@ -38,7 +39,7 @@ def get_bbox_intersections(boxes):
 
     return intersections
 
-def generate_fibres(domain_size, num_points, std_angle, device):
+def generate_fibres_poisson(domain_size, num_points, radius, std_angle, device):
     """
     Generate fibres in a cubic domain of given size.
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
@@ -51,11 +52,48 @@ def generate_fibres(domain_size, num_points, std_angle, device):
     """
     # Random starting coordinates at z=0
     # Generate Poisson disk samples (2D)
-    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=0.35, k=30)
+    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=radius, k=30)
     samples = torch.tensor(samples, dtype=torch.float32, device=device)
     n_fibres = samples.shape[0]
     z0 = torch.zeros(samples.shape[0], 1, device=device)
     coords0 = torch.cat([samples, z0], dim=1)  # (n_fibres, 3)
+
+    # Base direction (0, 0, 1) with Gaussian perturbations in x/y
+    dx = torch.randn(n_fibres, 1, device=device) * std_angle
+    dy = torch.randn(n_fibres, 1, device=device) * std_angle
+    dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
+    dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
+    dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+
+    # Calculate lengths until they hit the top (z = domain_size)
+    lengths = (domain_size[2] - z0) / dirs[:, 2:3]  # (n_fibres, 1)
+    step_lengths = lengths / (num_points - 1)  # (n_fibres, 1)
+
+    # Calculate step vectors
+    steps = dirs * step_lengths  # (n_fibres, 3)
+
+    # Indices for steps
+    idx = torch.arange(num_points, device=device).view(1, -1, 1)  # (1, num_points, 1)
+
+    # Compute all points
+    fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
+    return fibres, step_lengths
+
+def generate_fibres_random(domain_size, num_points, n_fibres, std_angle, device):
+    """
+    Generate n_fibres fibres in a cubic domain of given size.
+    domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
+    num_points: number of points per fibre
+    std_angle: standard deviation of angle perturbation from vertical (z) direction
+    returns:
+    - fibres: (n_fibres, num_points, 3) tensor of coordinates
+    - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
+    """
+    # Random starting coordinates at z=0
+    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
+    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
+    z0 = torch.zeros(n_fibres, 1, device=device)
+    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
     # Base direction (0, 0, 1) with Gaussian perturbations in x/y
     dx = torch.randn(n_fibres, 1, device=device) * std_angle
@@ -91,3 +129,16 @@ def angle_between(p1, p2, p3, eps=1e-8):
     angle = torch.atan2(cross_norm + eps, dot)
     # atan2(y, x) returns in (-pi, pi); because we use abs(cross) angle is in (0, pi]
     return angle
+
+def save_model(jobname, fibres, steps, time, domain_size, diameter):
+    if not os.path.exists(f"results/{jobname}/models"):
+        os.makedirs(f"results/{jobname}/models")
+    save_dict = {
+        "fibres": fibres,
+        "steps": steps,
+        "time": time,
+        "domain_size": domain_size,
+        "diameter": diameter
+    }
+
+    torch.save(save_dict, f"results/{jobname}/models/{jobname}_{steps}.pt")

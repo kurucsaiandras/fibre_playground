@@ -3,6 +3,6 @@
 *.pt
 *.pyc
 __pycache__/
-logs/
-models/
+init/
+results/
 figs/

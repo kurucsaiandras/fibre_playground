@@ -3,12 +3,10 @@ import os
 
 def log(jobname, filename, step, time, length, curvature, boundary, collision,
         total, n_fibres, fibre_diameter, domain_size):
-    # check if folder logs/jobname exists, if not create it
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
-    if not os.path.exists(f"logs/{jobname}"):
-        os.makedirs(f"logs/{jobname}")
-    with open(f"logs/{jobname}/{filename}.csv", "a") as f:
+    # check if folder jobname/logs exists, if not create it
+    if not os.path.exists(f"results/{jobname}/logs"):
+        os.makedirs(f"results/{jobname}/logs")
+    with open(f"results/{jobname}/logs/{filename}.csv", "a") as f:
         if step == 0:
             f.write(
                 "step,time,length,curvature,boundary,collision,total,"

@@ -6,6 +6,21 @@ import argparse
 import utils
 import losses
 import logger
+import config_parser
+import os
+import shutil
+
+# parse arg that specifies jobname
+parser = argparse.ArgumentParser(description="Fibre simulation")
+parser.add_argument("--jobname", type=str, nargs='?', default="fibre_sim", help="Job name for output files")
+parser.add_argument("--config_name", type=str, nargs='?', default="default", help="Config file name used for all parameters")
+args = parser.parse_args()
+jobname = args.jobname
+config_name = args.config_name
+if not os.path.exists("results"):
+    os.makedirs("results")
+if not os.path.exists(f"results/{jobname}"):
+    os.makedirs(f"results/{jobname}")
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -15,36 +30,47 @@ print(f"Using device: {device}")
 # ------------------------
 # Setup
 # ------------------------
-resolution = 50 # TODO we need bigger number here to actually avoid collisions
-#n_fibres = 200
-domain_size = torch.tensor([10.0, 10.0, 10.0], device=device)
-domain_size_final = torch.tensor([6.8, 6.8, 10.0], device=device)
-angle_std_dev = 0.05
-fibre_diameter = 0.05
-fibre_diameter_final = 0.3
-n_iter = 500000
-collision_loss_threshold = 0
+shutil.copy(f"config/{config_name}.yaml", f"results/{jobname}/config.yaml")
+config = config_parser.load_config(f"config/{config_name}.yaml")
 
-fibres, spring_L_linear = utils.generate_fibres(domain_size, resolution, angle_std_dev, device)
+if config.initialization.method == 'generate':
+    if config.initialization.generate.method == 'poisson':
+        fibres, l0_length = utils.generate_fibres_poisson(
+            torch.tensor(config.initialization.generate.domain_size_initial, device=device),
+            config.initialization.generate.resolution,
+            config.initialization.generate.poisson_radius,
+            config.initialization.generate.angle_std_dev,
+            device)
+    elif config.initialization.generate.method == 'random':
+        fibres, l0_length = utils.generate_fibres_random(
+            torch.tensor(config.initialization.generate.domain_size_initial, device=device),
+            config.initialization.generate.resolution,
+            config.initialization.generate.num_of_fibres,
+            config.initialization.generate.angle_std_dev,
+            device)
+    # save initial fibres and Ls
+    if not os.path.exists("init"):
+        os.makedirs("init")
+    if not os.path.exists(f"init/{jobname}"):
+        os.makedirs(f"init/{jobname}")
+    torch.save(fibres.cpu(), f"init/{jobname}/fibre_coords_initial.pt")
+    torch.save(l0_length.cpu(), f"init/{jobname}/fibre_l0_initial.pt")
+    shutil.copy(f"config/{config_name}.yaml", f"init/{jobname}/config.yaml")
+    # set current domain size
+    domain_size_current = torch.tensor(config.initialization.generate.domain_size_initial, device=device)
+elif config.initialization.method == 'load':
+    fibres = torch.load( f"init/{config.initialization.load.name}/fibre_coords_initial.pt").to(device)
+    l0_length = torch.load(f"init/{config.initialization.load.name}/fibre_l0_initial.pt").to(device)
+    config_init = config_parser.load_config(f"init/{config.initialization.load.name}/config.yaml").initialization
+    # set domain size from saved config
+    domain_size_current = torch.tensor(config_init.generate.domain_size_initial, device=device)
+phi0_curvature = math.pi
 n_fibres = fibres.shape[0]
-print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter/2)**2 / ((domain_size[0]+fibre_diameter)*(domain_size[1]+fibre_diameter)):.3f}")
+fibre_diameter_current = config.initialization.generate.fibre_diameter_initial
+print(f"Fibre to volume ratio: {n_fibres * math.pi * (fibre_diameter_current/2)**2 /((domain_size_current[0]+fibre_diameter_current)*(domain_size_current[1]+fibre_diameter_current)):.3f}")
 print(f"Number of fibres: {n_fibres}")
-spring_k_linear = 0.1 # TODO tune based on the step length
-spring_k_torsional = 0.1 # TODO tune based on the step length
-spring_L_torsional = math.pi
-spring_k_boundary = 1.0
-spring_k_collision = 100.0
 
-to_plot = False
-
-# parse arg that specifies jobname
-jobname = "fibre_sim"
-parser = argparse.ArgumentParser(description="Fibre simulation")
-parser.add_argument("--jobname", type=str, nargs='?', default="fibre_sim", help="Job name for output files")
-args = parser.parse_args()
-jobname = args.jobname
-
-if to_plot:
+if config.stats.to_plot:
     import pyvista as pv
     plotter = pv.Plotter()
 
@@ -52,8 +78,8 @@ if to_plot:
     meshes = []
     for i in range(n_fibres):
         arr = fibres[i].cpu().numpy()
-        line = pv.Spline(arr, n_points=resolution)
-        tube = line.tube(radius=fibre_diameter / 2.0)
+        line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
+        tube = line.tube(radius=fibre_diameter_current / 2.0)
         plotter.add_mesh(tube, color="lightsteelblue", smooth_shading=True)
         meshes.append(tube)  # keep reference to update points
 
@@ -61,67 +87,85 @@ if to_plot:
 
 # Optimize for all fibres
 fibres_params = torch.nn.Parameter(fibres.clone())
-optimizer = torch.optim.Adam([fibres_params], lr=1e-2)
+if config.optimization.optimizer == 'adam':
+    optimizer = torch.optim.Adam([fibres_params], lr=config.optimization.learning_rate)
+elif config.optimization.optimizer == 'lbfgs':
+    optimizer = torch.optim.LBFGS([fibres_params], lr=config.optimization.learning_rate, max_iter=20, history_size=100)
+
+# globals for logging
+last_losses = {}
+global_start_time = time.time()
+current_step = 0
+def closure():
+    optimizer.zero_grad()
+
+    loss_length = losses.length_loss(fibres_params, config.spring_system.k_length, l0_length)
+    loss_curvature = losses.curvature_loss(fibres_params, config.spring_system.k_curvature, phi0_curvature)
+    loss_boundary = losses.boundary_loss(fibres_params, domain_size_current, config.spring_system.k_boundary)
+    loss_collision = losses.collision_loss(fibres_params, config.spring_system.k_collision, fibre_diameter_current)
+
+    loss_sum = loss_length + loss_curvature + loss_boundary + loss_collision
+
+    if not torch.isfinite(loss_sum):
+        print("Non-finite loss in closure -> aborting")
+        return loss_sum
+
+    loss_sum.backward()
+
+    # store individual losses for later
+    last_losses["length"] = loss_length.detach()
+    last_losses["curvature"] = loss_curvature.detach()
+    last_losses["boundary"] = loss_boundary.detach()
+    last_losses["collision"] = loss_collision.detach()
+
+    # save params if no collisions before updating the points
+    if loss_collision == 0:
+        utils.save_model(jobname, fibres_params.data.cpu(),
+                         current_step, time.time()-global_start_time,
+                         domain_size_current, fibre_diameter_current)
+
+    return loss_sum
 
 # ------------------------
 # Optimization loop
 # ------------------------
 
-max_grad_norm = 1.0
-
 def optimize():
-    global fibre_diameter, domain_size, collision_loss_threshold
+    global fibre_diameter_current, domain_size_current, current_step, global_start_time
     # start timer
     start_time = time.time()
     global_start_time = start_time
-    for step in range(n_iter+1):
-        optimizer.zero_grad()
-
-        # Length loss (distances)
-        loss_length = losses.length_loss(fibres_params, spring_k_linear, spring_L_linear)
-        # Curvature loss (angles)
-        loss_curvature = losses.curvature_loss(fibres_params, spring_k_torsional, spring_L_torsional)
-        # Boundary loss
-        loss_boundary = losses.boundary_loss(fibres_params, domain_size, spring_k_boundary)
-        # Collision loss
-        loss_collision = losses.collision_loss(fibres_params, spring_k_collision, fibre_diameter)
-
-        loss_sum = loss_length + loss_curvature + loss_boundary + loss_collision
-
-        # detect bad loss before backward
-        if not torch.isfinite(loss_sum):
-            print("Non-finite loss at step", step, "-> aborting")
-            break
-
-        loss_sum.backward()
-
+    for step in range(config.evolution.max_iterations+1):
+        current_step = step
+        loss_sum = optimizer.step(closure)
+        loss_length = last_losses["length"]
+        loss_curvature = last_losses["curvature"]
+        loss_boundary = last_losses["boundary"]
+        loss_collision = last_losses["collision"]
         # gradient clipping to avoid explosion
-        torch.nn.utils.clip_grad_norm_([fibres_params], max_grad_norm)
+        if config.optimization.grad_clipping:
+            torch.nn.utils.clip_grad_norm_([fibres_params], config.optimization.max_grad_norm)
 
-        # save params and log if no collisions or every 100 steps
-        if loss_collision <= collision_loss_threshold or step % 100 == 0:
+        # save params and log if no collisions or every specified steps
+        if loss_collision <= config.evolution.collision_threshold or step % config.stats.logging_freq == 0:
             if loss_collision == 0:
-                torch.save(fibres_params.data.cpu(), f"models/{jobname}.pt")
                 log_file_name = "model_saves"
                 elapsed = (time.time() - global_start_time)
-            elif step % 100 == 0:
+            elif step % config.stats.logging_freq == 0:
                 log_file_name = "progress"
-                elapsed = (time.time() - start_time) / 100
-                if to_plot:
+                elapsed = (time.time() - start_time) / config.stats.logging_freq
+                if config.stats.to_plot:
                     # Update PyVista meshes
                     for i in range(n_fibres):
                         arr = fibres_params[i].detach().cpu().numpy()
-                        new_line = pv.Spline(arr, n_points=resolution)
-                        new_tube = new_line.tube(radius=fibre_diameter * 0.5)
+                        new_line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
+                        new_tube = new_line.tube(radius=fibre_diameter_current * 0.5)
                         meshes[i].points[:] = new_tube.points
                 start_time = time.time()
             logger.log(jobname, log_file_name, step, elapsed,
                 loss_length.item(), loss_curvature.item(),
                 loss_boundary.item(), loss_collision.item(),
-                loss_sum.item(), n_fibres, fibre_diameter, domain_size.cpu().numpy())
-
-        # fibres_params gets updated here!
-        optimizer.step()
+                loss_sum.item(), n_fibres, fibre_diameter_current, domain_size_current.cpu().numpy())
 
         # sanity check after step
         if not torch.all(torch.isfinite(fibres_params)):
@@ -129,26 +173,26 @@ def optimize():
             break
             
         # adjust configuration if no collisions
-        if loss_collision <= collision_loss_threshold:
+        if loss_collision <= config.evolution.collision_threshold:
             # first, increase fibre diameter until target
-            if fibre_diameter < fibre_diameter_final:
-                fibre_diameter += 0.01
+            if fibre_diameter_current < config.evolution.fibre_diameter_final:
+                fibre_diameter_current += 0.01
             # then, decrease domain size until target
-            elif domain_size[0] > domain_size_final[0]:
-                domain_size[0] -= 0.1
-                domain_size[1] -= 0.1
+            elif domain_size_current[0] > config.evolution.domain_size_final[0]:
+                domain_size_current[0] -= 0.1
+                domain_size_current[1] -= 0.1
                 # subtract 0.05 from x and y of points
                 fibres_params.data[:, :, 0] -= 0.05
                 fibres_params.data[:, :, 1] -= 0.05
             else:
-                if collision_loss_threshold > 0:
-                    collision_loss_threshold = 0
+                if config.evolution.collision_threshold > 0:
+                    config.evolution.collision_threshold = 0
                 else:
                     print("Reached target configuration -> stopping")
                     break
 
 def main():
-    if to_plot:
+    if config.stats.to_plot:
         threading.Thread(target=optimize, daemon=True).start()
         # call update in main thread until optimization is done
         while True:

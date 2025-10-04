@@ -1,0 +1,37 @@
+initialization:
+  method: generate # or load
+  generate:
+    method: random # or poisson
+    num_of_fibres: 200
+    poisson_radius: 0.55
+    resolution: 30
+    fibre_diameter_initial: 0.2
+    domain_size_initial: [10.0, 10.0, 10.0]
+    angle_std_dev: 0.05
+  load:
+    name: fibre_sim
+
+spring_system:
+  k_length: 0.1
+  k_curvature: 0.1
+  k_boundary: 1.0
+  k_collision: 100.0
+
+evolution:
+  max_iterations: 500000
+  fibre_diameter_final: 0.5
+  fibre_diameter_step: 0.01
+  domain_size_final: [8.0, 8.0, 10.0]
+  domain_size_step: 0.1
+  collision_threshold: 0
+
+optimization:
+  optimizer: adam # or lbfgs
+  learning_rate: 0.01
+  grad_clipping: False
+  max_grad_norm: 1.0
+
+stats:
+  to_plot: True
+  logging_freq: 100
+

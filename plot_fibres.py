@@ -2,9 +2,10 @@ import torch
 import pyvista as pv
 
 plotter = pv.Plotter()
-fibres = torch.load("fibre_coords.pt").to("cpu")  # (n_fibres, n_points, 3)
+model = torch.load("fibre_sim.pt")
+fibres = model["fibres"]  # (n_fibres, n_points, 3)
+fibre_diameter = model["diameter"]
 n_fibres, n_points, _ = fibres.shape
-fibre_diameter = 0.5
 
 for i in range(n_fibres):
     arr = fibres[i].cpu().numpy()

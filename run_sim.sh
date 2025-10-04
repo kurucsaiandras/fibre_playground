@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # specify job name
-NAME="fibre_sim"
+NAME="fibre_sim_poisson"
+CONFIG="default"
 
 #BSUB -J fibre_sim
 #BSUB -o fibre_sim_%J.out
@@ -11,4 +12,4 @@ NAME="fibre_sim"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 
-python ./fibre_sim.py --jobname $NAME
+python ./fibre_sim.py --jobname $NAME --config_name $CONFIG

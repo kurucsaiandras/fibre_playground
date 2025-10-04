@@ -17,6 +17,20 @@ def collision_loss(points, k, D):
     loss = penalties.sum()
     return loss
 
+def collision_loss_inf_wall(points, alpha, D):
+    boxes = utils.get_bounding_boxes(points, D*0.5)
+    intersections = utils.get_bbox_intersections(boxes)
+
+    i_idx, j_idx = intersections.nonzero(as_tuple=True)
+
+    dists = torch.norm(points[i_idx, :, None, :] - points[j_idx, None, :, :], dim=-1)
+
+    # infinite wall penalty
+    penalties = torch.clamp(-alpha * torch.log(dists / D), min=0.0)
+
+    loss = penalties.sum()
+    return loss
+
 def length_loss(points, k, L):
     """
     points: (n_fibres, resolution, 3)
