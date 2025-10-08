@@ -53,6 +53,7 @@ class OptimizationConfig:
 @dataclass
 class StatsConfig:
     to_plot: bool
+    plot_pbc: bool
     logging_freq: int
 
 @dataclass

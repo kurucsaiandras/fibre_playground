@@ -2,13 +2,27 @@ import utils
 import torch
 import torch.nn.functional as F
 
-def collision_loss(points, k, D):
+def collision_loss(points, k, D, domain_size):
     boxes = utils.get_bounding_boxes(points, D*0.5)
-    intersections = utils.get_bbox_intersections(boxes)
+    intersections, intersections_x_pbc, intersections_y_pbc, intersections_xy_pbc, intersections_yx_pbc = utils.get_bbox_intersections(boxes, domain_size)
 
     i_idx, j_idx = intersections.nonzero(as_tuple=True)
-
     dists = torch.norm(points[i_idx, :, None, :] - points[j_idx, None, :, :], dim=-1)
+
+    # pbc x
+    i_idx_x, j_idx_x = intersections_x_pbc.nonzero(as_tuple=True)
+    dists_x = torch.norm((points[i_idx_x, :, None, :] - torch.tensor([domain_size[0],0,0], device=points.device)) - points[j_idx_x, None, :, :], dim=-1)
+    # pbc y
+    i_idx_y, j_idx_y = intersections_y_pbc.nonzero(as_tuple=True)
+    dists_y = torch.norm((points[i_idx_y, :, None, :] - torch.tensor([0,domain_size[1],0], device=points.device)) - points[j_idx_y, None, :, :], dim=-1)
+    # pbc xy
+    i_idx_xy, j_idx_xy = intersections_xy_pbc.nonzero(as_tuple=True)
+    dists_xy = torch.norm((points[i_idx_xy, :, None, :] - torch.tensor([domain_size[0],domain_size[1],0], device=points.device)) - points[j_idx_xy, None, :, :], dim=-1)
+    # pbc yx
+    i_idx_yx, j_idx_yx = intersections_yx_pbc.nonzero(as_tuple=True)
+    dists_yx = torch.norm((points[i_idx_yx, :, None, :] - torch.tensor([domain_size[0],0,0], device=points.device)) - (points[j_idx_yx, None, :, :] - torch.tensor([0,domain_size[1],0], device=points.device)), dim=-1)
+    # concatenate all distances
+    dists = torch.cat([dists, dists_x, dists_y, dists_xy, dists_yx], dim=0)
 
     # penalty
     d_l = F.relu(D - dists)

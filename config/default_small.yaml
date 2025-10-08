@@ -33,5 +33,6 @@ optimization:
 
 stats:
   to_plot: True
+  plot_pbc: True
   logging_freq: 100
 

@@ -9,11 +9,14 @@ import logger
 import config_parser
 import os
 import shutil
+import sys
+#sys.path.append("E:/DTU/thesis/Pytorch-PCGrad")
+#from pcgrad import PCGrad
 
 # parse arg that specifies jobname
 parser = argparse.ArgumentParser(description="Fibre simulation")
 parser.add_argument("--jobname", type=str, nargs='?', default="fibre_sim", help="Job name for output files")
-parser.add_argument("--config_name", type=str, nargs='?', default="default", help="Config file name used for all parameters")
+parser.add_argument("--config_name", type=str, nargs='?', default="default_small", help="Config file name used for all parameters")
 args = parser.parse_args()
 jobname = args.jobname
 config_name = args.config_name
@@ -73,15 +76,22 @@ print(f"Number of fibres: {n_fibres}")
 if config.stats.to_plot:
     import pyvista as pv
     plotter = pv.Plotter()
+    offsets = utils.get_offsets(domain_size_current, config.stats.plot_pbc, device)
+    colors = ["lightsteelblue", "blue", "green", "purple"]
 
     # Build initial tube meshes and add to plotter, storing the PolyData objects
     meshes = []
-    for i in range(n_fibres):
-        arr = fibres[i].cpu().numpy()
-        line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
-        tube = line.tube(radius=fibre_diameter_current / 2.0)
-        plotter.add_mesh(tube, color="lightsteelblue", smooth_shading=True)
-        meshes.append(tube)  # keep reference to update points
+    for offset, color in zip(offsets, colors):
+        for i in range(n_fibres):
+            arr = (fibres[i] + offset).cpu().numpy()
+            line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
+            tube = line.tube(radius=fibre_diameter_current / 2.0)
+            actor = plotter.add_mesh(tube, color=color, smooth_shading=True)
+            meshes.append((actor, tube)) # keep reference to update points
+    
+    # plot domain box
+    box = pv.Box(bounds=(0, domain_size_current[0].cpu().numpy(), 0, domain_size_current[1].cpu().numpy(), 0, domain_size_current[2].cpu().numpy()))
+    plotter.add_mesh(box, style="wireframe", color="black")
 
     plotter.show(auto_close=False, interactive_update=True)
 
@@ -102,7 +112,7 @@ def closure():
     loss_length = losses.length_loss(fibres_params, config.spring_system.k_length, l0_length)
     loss_curvature = losses.curvature_loss(fibres_params, config.spring_system.k_curvature, phi0_curvature)
     loss_boundary = losses.boundary_loss(fibres_params, domain_size_current, config.spring_system.k_boundary)
-    loss_collision = losses.collision_loss(fibres_params, config.spring_system.k_collision, fibre_diameter_current)
+    loss_collision = losses.collision_loss(fibres_params, config.spring_system.k_collision, fibre_diameter_current, domain_size_current)
 
     loss_sum = loss_length + loss_curvature + loss_boundary + loss_collision
 
@@ -111,6 +121,7 @@ def closure():
         return loss_sum
 
     loss_sum.backward()
+    #optimizer.pc_backward([loss_length, loss_curvature, loss_boundary, loss_collision])
 
     # store individual losses for later
     last_losses["length"] = loss_length.detach()
@@ -155,12 +166,22 @@ def optimize():
                 log_file_name = "progress"
                 elapsed = (time.time() - start_time) / config.stats.logging_freq
                 if config.stats.to_plot:
-                    # Update PyVista meshes
-                    for i in range(n_fibres):
-                        arr = fibres_params[i].detach().cpu().numpy()
-                        new_line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
-                        new_tube = new_line.tube(radius=fibre_diameter_current * 0.5)
-                        meshes[i].points[:] = new_tube.points
+                    offsets = utils.get_offsets(domain_size_current, config.stats.plot_pbc, device)
+                    for j, offset in enumerate(offsets):
+                        # Update PyVista meshes
+                        for i in range(n_fibres):
+                            arr = (fibres_params[i] + offset).detach().cpu().numpy()
+                            new_line = pv.Spline(arr, n_points=config.initialization.generate.resolution)
+                            new_tube = new_line.tube(radius=fibre_diameter_current * 0.5)
+                            actor, tube = meshes[i + j*n_fibres]
+                            tube.points[:] = new_tube.points
+                            #if (i in i_idx_x) or (i in j_idx_x):
+                            #    actor.prop.color = "red"
+                            #else:
+                            #    actor.prop.color = colors[j]
+                    # update box
+                    new_box = pv.Box(bounds=(0, domain_size_current[0].cpu().numpy(), 0, domain_size_current[1].cpu().numpy(), 0, domain_size_current[2].cpu().numpy()))
+                    box.points[:] = new_box.points
                 start_time = time.time()
             logger.log(jobname, log_file_name, step, elapsed,
                 loss_length.item(), loss_curvature.item(),
