@@ -13,12 +13,13 @@ def get_bounding_boxes(points, radius):
     boxes = torch.stack([min_coords.min(dim=1).values, max_coords.max(dim=1).values], dim=1)
     return boxes
 
-def get_bbox_intersections(boxes, domain_size):
+def get_bbox_intersections(boxes, domain_size, apply_pbc):
     """
     boxes: (n_fibres, 2, 3) tensor of bounding boxes: p_min, p_max
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
     returns: (n_fibres, n_fibres) boolean tensor indicating which boxes intersect
     """
+    intersections = {}
     p_min = boxes[:, 0, :]  # (n, 3)
     p_max = boxes[:, 1, :]  # (n, 3)
 
@@ -31,30 +32,30 @@ def get_bbox_intersections(boxes, domain_size):
     overlap_y = (p_min_exp[:, :, 1] <= p_max_exp[:, :, 1].T) & (p_max_exp[:, :, 1] >= p_min_exp[:, :, 1].T)
     overlap_z = (p_min_exp[:, :, 2] <= p_max_exp[:, :, 2].T) & (p_max_exp[:, :, 2] >= p_min_exp[:, :, 2].T)
 
-    # PBCs
-    overlap_x_pbc = (p_min_exp[:, :, 0] - domain_size[0] <= p_max_exp[:, :, 0].T) & (p_max_exp[:, :, 0] - domain_size[0] >= p_min_exp[:, :, 0].T)
-    overlap_y_pbc = (p_min_exp[:, :, 1] - domain_size[1] <= p_max_exp[:, :, 1].T) & (p_max_exp[:, :, 1] - domain_size[1] >= p_min_exp[:, :, 1].T)
-
     # Boxes intersect if they overlap in all three dimensions
-    intersections = overlap_x & overlap_y & overlap_z
-
-    # PBC intersections
-    intersections_x_pbc = overlap_x_pbc & overlap_y & overlap_z
-    intersections_y_pbc = overlap_x & overlap_y_pbc & overlap_z
-    intersections_xy_pbc = overlap_x_pbc & overlap_y_pbc & overlap_z
-    intersections_yx_pbc = overlap_x_pbc & overlap_y_pbc.T & overlap_z
-
     # remove double counting (i,j) and (j,i) and self-intersections
-    intersections = torch.triu(intersections, diagonal=1)
-    # only remove self-intersections for pbc (keep the symmetric ones)
-    intersections_x_pbc = intersections_x_pbc & (~torch.eye(intersections_x_pbc.shape[0], dtype=bool, device=intersections_x_pbc.device))
-    intersections_y_pbc = intersections_y_pbc & (~torch.eye(intersections_y_pbc.shape[0], dtype=bool, device=intersections_y_pbc.device))
-    intersections_xy_pbc = intersections_xy_pbc & (~torch.eye(intersections_xy_pbc.shape[0], dtype=bool, device=intersections_xy_pbc.device))
-    intersections_yx_pbc = intersections_yx_pbc & (~torch.eye(intersections_yx_pbc.shape[0], dtype=bool, device=intersections_yx_pbc.device))
+    intersections["normal"] = torch.triu(overlap_x & overlap_y & overlap_z, diagonal=1)
 
-    return intersections, intersections_x_pbc, intersections_y_pbc, intersections_xy_pbc, intersections_yx_pbc
+    if apply_pbc:
+        # PBCs
+        overlap_x_pbc = (p_min_exp[:, :, 0] - domain_size[0] <= p_max_exp[:, :, 0].T) & (p_max_exp[:, :, 0] - domain_size[0] >= p_min_exp[:, :, 0].T)
+        overlap_y_pbc = (p_min_exp[:, :, 1] - domain_size[1] <= p_max_exp[:, :, 1].T) & (p_max_exp[:, :, 1] - domain_size[1] >= p_min_exp[:, :, 1].T)
 
-def generate_fibres_poisson(domain_size, num_points, radius, std_angle, device):
+        # PBC intersections
+        intersections["x_pbc"] = overlap_x_pbc & overlap_y & overlap_z
+        intersections["y_pbc"] = overlap_x & overlap_y_pbc & overlap_z
+        intersections["xy_pbc"] = overlap_x_pbc & overlap_y_pbc & overlap_z
+        intersections["yx_pbc"] = overlap_x_pbc & overlap_y_pbc.T & overlap_z
+
+        # only remove self-intersections for pbc (keep the symmetric ones)
+        intersections["x_pbc"] = intersections["x_pbc"] & (~torch.eye(intersections["x_pbc"].shape[0], dtype=bool, device=intersections["x_pbc"].device))
+        intersections["y_pbc"] = intersections["y_pbc"] & (~torch.eye(intersections["y_pbc"].shape[0], dtype=bool, device=intersections["y_pbc"].device))
+        intersections["xy_pbc"] = intersections["xy_pbc"] & (~torch.eye(intersections["xy_pbc"].shape[0], dtype=bool, device=intersections["xy_pbc"].device))
+        intersections["yx_pbc"] = intersections["yx_pbc"] & (~torch.eye(intersections["yx_pbc"].shape[0], dtype=bool, device=intersections["yx_pbc"].device))
+
+    return intersections
+
+def generate_fibres_poisson(config, device):
     """
     Generate fibres in a cubic domain of given size.
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
@@ -65,9 +66,14 @@ def generate_fibres_poisson(domain_size, num_points, radius, std_angle, device):
     - fibres: (n_fibres, num_points, 3) tensor of coordinates
     - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
     """
+    # extract params from config
+    radius = config.initialization.generate.fibre_diameter_initial * 0.5
+    num_points = config.initialization.generate.resolution
+    std_angle = config.initialization.generate.angle_std_dev
+    domain_size = config.initialization.generate.domain_size_initial
     # Random starting coordinates at z=0
     # Generate Poisson disk samples (2D)
-    samples = pd.Bridson_sampling(dims=domain_size[:2].cpu().numpy(), radius=radius, k=30)
+    samples = pd.Bridson_sampling(dims=domain_size[:2], radius=radius, k=30)
     samples = torch.tensor(samples, dtype=torch.float32, device=device)
     n_fibres = samples.shape[0]
     z0 = torch.zeros(samples.shape[0], 1, device=device)
@@ -94,7 +100,7 @@ def generate_fibres_poisson(domain_size, num_points, radius, std_angle, device):
     fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
     return fibres, step_lengths
 
-def generate_fibres_random(domain_size, num_points, n_fibres, std_angle, device):
+def generate_fibres_random(config, device):
     """
     Generate n_fibres fibres in a cubic domain of given size.
     domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
@@ -104,6 +110,11 @@ def generate_fibres_random(domain_size, num_points, n_fibres, std_angle, device)
     - fibres: (n_fibres, num_points, 3) tensor of coordinates
     - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
     """
+    # extract params from config
+    n_fibres = config.initialization.generate.num_of_fibres
+    num_points = config.initialization.generate.resolution
+    std_angle = config.initialization.generate.angle_std_dev
+    domain_size = config.initialization.generate.domain_size_initial
     # Random starting coordinates at z=0
     x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
     y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
@@ -145,31 +156,18 @@ def angle_between(p1, p2, p3, eps=1e-8):
     # atan2(y, x) returns in (-pi, pi); because we use abs(cross) angle is in (0, pi]
     return angle
 
-def get_offsets(domain_size_current, apply_pbo, device):
+def get_offsets(domain_size_current, apply_pbc, device):
     """
     domain_size_current: (3,) tensor/list specifying [x_max, y_max, z_max]
-    apply_pbo: bool, whether to apply periodic boundary offsets in x and y directions
+    apply_pbc: bool, whether to apply periodic boundary offsets in x and y directions
     device: torch device
     returns: list of (3,) tensors specifying offsets to apply to points for PBC
     """
     offsets = [torch.zeros(3, device=device)]
-    if apply_pbo:
+    if apply_pbc:
         offsets += [
             torch.tensor([domain_size_current[0], 0, 0], device=device),
             torch.tensor([0, domain_size_current[1], 0], device=device),
             torch.tensor([domain_size_current[0], domain_size_current[1], 0], device=device),
         ]
     return offsets
-
-def save_model(jobname, fibres, steps, time, domain_size, diameter):
-    if not os.path.exists(f"results/{jobname}/models"):
-        os.makedirs(f"results/{jobname}/models")
-    save_dict = {
-        "fibres": fibres,
-        "steps": steps,
-        "time": time,
-        "domain_size": domain_size,
-        "diameter": diameter
-    }
-
-    torch.save(save_dict, f"results/{jobname}/models/{jobname}_{steps}.pt")

@@ -20,6 +20,7 @@ class GenerateConfig:
 @dataclass
 class LoadConfig:
     name: str
+    step: int
 
 @dataclass
 class InitializationConfig:
@@ -42,6 +43,7 @@ class EvolutionConfig:
     domain_size_final: List[float]
     domain_size_step: float
     collision_threshold: float
+    apply_pbc: bool
 
 @dataclass
 class OptimizationConfig:
@@ -53,7 +55,6 @@ class OptimizationConfig:
 @dataclass
 class StatsConfig:
     to_plot: bool
-    plot_pbc: bool
     logging_freq: int
 
 @dataclass

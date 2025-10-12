@@ -9,7 +9,8 @@ initialization:
     domain_size_initial: [10.0, 10.0, 10.0]
     angle_std_dev: 0.05
   load:
-    name: fibre_sim
+    name: test_run
+    step: 0
 
 spring_system:
   k_length: 0.1
@@ -24,6 +25,7 @@ evolution:
   domain_size_final: [6.8, 6.8, 10.0]
   domain_size_step: 0.1
   collision_threshold: 0
+  apply_pbc: True
 
 optimization:
   optimizer: adam # or lbfgs
@@ -33,6 +35,4 @@ optimization:
 
 stats:
   to_plot: False
-  plot_pbc: False
   logging_freq: 100
-
