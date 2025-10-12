@@ -62,7 +62,7 @@ class FibreSimulation:
             loss.backward(retain_graph=True)
             grads.append(fibres_params.grad.clone())
 
-        # Apply projection: ensure A’s gradient is not increased
+        # Apply projection: ensure collision gradient is not increased
         g_collision = grads[3]
         g_total = sum(grads)
         # element-wise dot product and norm
