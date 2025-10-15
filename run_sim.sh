@@ -12,4 +12,4 @@ CONFIG="default"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 
-python ./fibre_sim.py --job_name $NAME --config $CONFIG
+python ./fibre_simulation.py --job_name $NAME --config $CONFIG

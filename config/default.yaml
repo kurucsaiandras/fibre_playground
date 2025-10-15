@@ -1,7 +1,7 @@
 initialization:
   method: generate # or load
   generate:
-    method: poisson # or poisson
+    method: random # or poisson
     num_of_fibres: 500
     poisson_radius: 0.35
     resolution: 50
@@ -26,7 +26,7 @@ evolution:
   domain_size_target: [6.8, 6.8, 10.0]
   domain_size_steps: 30
   collision_threshold: 0
-  apply_pbc: True
+  apply_pbc: False
 
 optimization:
   optimizer: adam # or lbfgs
