@@ -1,6 +1,7 @@
 import torch
 import poisson_disc as pd
 import os
+import re
 
 def get_bounding_boxes(points, radii):
     """
@@ -184,3 +185,16 @@ def get_offsets(domain_size_current, apply_pbc, device):
             torch.tensor([domain_size_current[0], domain_size_current[1], 0], device=device),
         ]
     return offsets
+
+def latest_rve(root: str) -> str:
+    """Return full path to the .pt file with the largest numeric name in a directory."""
+    files = [
+        f for f in os.listdir(root)
+        if f.endswith(".pt") and f[:-3].isdigit()
+    ]
+    if not files:
+        raise FileNotFoundError(f"No numeric .pt files found in {root}")
+
+    # Sort numerically by filename (excluding ".pt")
+    latest_file = max(files, key=lambda f: int(f[:-3]))
+    return os.path.join(root, latest_file)

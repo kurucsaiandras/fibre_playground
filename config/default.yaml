@@ -22,7 +22,7 @@ evolution:
   max_iterations: 500000
   fibre_r_target: 0.15
   fibre_r_steps: 30
-  fibre_r_std: 0.025
+  fibre_r_std: 0.01
   domain_size_target: [6.8, 6.8, 10.0]
   domain_size_steps: 30
   collision_threshold: 0

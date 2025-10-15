@@ -3,7 +3,13 @@ import pyvista as pv
 import utils
 
 plotter = pv.Plotter()
-model = torch.load("results/test_run_radii/rve/20494.pt")
+name = "test_run_radii"
+step = None
+if step is None:
+    path = utils.latest_rve(f"results/{name}/rve")
+else:
+    path = f"results/{name}/rve/{step}.pt"
+model = torch.load(path)
 fibre_coords = model["fibre_coords"].cpu().detach()  # (n_fibres, n_points, 3)
 fibre_r = model["fibre_r"].cpu()  # (n_fibres,)
 domain_size = model["domain_size"].cpu().numpy()
