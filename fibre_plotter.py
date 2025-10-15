@@ -13,7 +13,7 @@ class FibrePlotter:
             for i in range(rve.fibre_coords.shape[0]):
                 arr = (rve.fibre_coords[i] + offset).detach().cpu().numpy()
                 line = pv.Spline(arr, n_points=rve.fibre_coords.shape[1])
-                tube = line.tube(radius=rve.fibre_diameter*0.5)
+                tube = line.tube(radius=rve.fibre_r[i])
                 actor = self.plotter.add_mesh(tube, color=color, smooth_shading=True)
                 self.meshes.append((actor, tube)) # keep reference to update points
         
@@ -32,7 +32,7 @@ class FibrePlotter:
             for fibre_idx in range(n_fibres):
                 arr = (rve.fibre_coords[fibre_idx] + offset).detach().cpu().numpy()
                 new_line = pv.Spline(arr, n_points=rve.fibre_coords.shape[1])
-                new_tube = new_line.tube(radius=rve.fibre_diameter*0.5)
+                new_tube = new_line.tube(radius=rve.fibre_r[fibre_idx])
                 actor, tube = self.meshes[fibre_idx + i*n_fibres]
                 tube.points[:] = new_tube.points
                 #if (i in i_idx_x) or (i in j_idx_x):

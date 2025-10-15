@@ -13,7 +13,7 @@ class GenerateConfig:
     num_of_fibres: int
     poisson_radius: float
     resolution: int
-    fibre_diameter_initial: float
+    fibre_r_initial: float
     domain_size_initial: List[float]
     angle_std_dev: float
 
@@ -38,10 +38,11 @@ class SpringSystemConfig:
 @dataclass
 class EvolutionConfig:
     max_iterations: int
-    fibre_diameter_final: float
-    fibre_diameter_step: float
-    domain_size_final: List[float]
-    domain_size_step: float
+    fibre_r_target: float
+    fibre_r_steps: float
+    fibre_r_std: float
+    domain_size_target: List[float]
+    domain_size_steps: float
     collision_threshold: float
     apply_pbc: bool
 

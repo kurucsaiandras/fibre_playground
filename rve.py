@@ -17,24 +17,47 @@ class RVE:
         if config.initialization.method == 'generate':
             self.domain_size = torch.tensor(
                 config.initialization.generate.domain_size_initial, device=device)
-            self.fibre_diameter = config.initialization.generate.fibre_diameter_initial
             if config.initialization.generate.method == 'poisson':
                 self.fibre_coords, self.l0_length = utils.generate_fibres_poisson(config, device)
             elif config.initialization.generate.method == 'random':
                 self.fibre_coords, self.l0_length = utils.generate_fibres_random(config, device)
+            self.fibre_r, self.fibre_r_target = utils.generate_radii(self.fibre_coords.shape[0], config, device)
         elif config.initialization.method == 'load':
             state = torch.load(
                 f"results/{config.initialization.load.name}/rve/{config.initialization.load.step}.pt", map_location=device)
             self.fibre_coords = state['fibre_coords']
             self.l0_length = state['l0_length']
             self.domain_size = state['domain_size']
-            self.fibre_diameter = state['fibre_diameter']
+            self.fibre_r = state['fibre_r']
+            self.fibre_r_target = state['fibre_r_target']
             if state['apply_pbc'] != self.apply_pbc:
                 print("Warning: loaded RVE has different PBC setting than current config.")
                 print(f"Using setting from config: apply_pbc = {self.apply_pbc}")
         # make fibre_coords torch parameter
         self.fibre_coords = torch.nn.Parameter(self.fibre_coords)
+        # calculate r step
+        self.r_incr = (self.fibre_r_target - self.fibre_r) / config.evolution.fibre_r_steps
+        # calculate domain size step
+        self.domain_size_target = torch.tensor(config.evolution.domain_size_target, device=device)
+        self.domain_size_incr = (self.domain_size_target - self.domain_size) / config.evolution.domain_size_steps
         
+    def evolve(self):
+        """
+        Evolve the RVE by one step in fibre radii or domain size.
+        Returns True if evolution is complete (both radii and domain size reached target).
+        """
+        # first, increase fibre radii until target (account for float precision)
+        if torch.any(self.fibre_r < self.fibre_r_target - 1e-6):
+            self.fibre_r = self.fibre_r + self.r_incr
+            return False
+        # then, decrease domain size until target (account for float precision)
+        if torch.any(self.domain_size > self.domain_size_target + 1e-6):
+            self.domain_size = self.domain_size + self.domain_size_incr
+            self.fibre_coords.data[:, :, 0] += self.domain_size_incr[0] * 0.5
+            self.fibre_coords.data[:, :, 1] += self.domain_size_incr[1] * 0.5
+            return False
+        return True
+
     def save(self, job_name, step, time):
         save_dict = {
             "fibre_coords": self.fibre_coords,
@@ -42,27 +65,22 @@ class RVE:
             "time": time,
             "step": step,
             "domain_size": self.domain_size,
-            "fibre_diameter": self.fibre_diameter,
+            "fibre_r": self.fibre_r,
+            "fibre_r_target": self.fibre_r_target,
             "apply_pbc": self.apply_pbc
         }
         torch.save(save_dict, f"results/{job_name}/rve/{step}.pt")
 
     def get_fibre_to_volume_ratio(self):
-        n_fibres = self.fibre_coords.shape[0]
-        if self.apply_pbc:
-            padding = self.fibre_diameter
-        else:
-            padding = 0.0
-        fibre_to_volume_ratio = (n_fibres * math.pi * (self.fibre_diameter*0.5)**2
-            / ((self.domain_size[0] + padding) * (self.domain_size[1] + padding)))
-        return fibre_to_volume_ratio
+        return torch.pow(self.fibre_r, 2).sum() * math.pi / (self.domain_size[0] * self.domain_size[1])
 
     def collision_loss(self):
-        boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_diameter*0.5)
+        boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_r)
         intersections = utils.get_bbox_intersections(boxes, self.domain_size, self.apply_pbc)
 
         i_idx, j_idx = intersections["normal"].nonzero(as_tuple=True)
         dists = torch.norm(self.fibre_coords[i_idx, :, None, :] - self.fibre_coords[j_idx, None, :, :], dim=-1)
+        expected_dists = self.fibre_r[i_idx].view(-1,1,1) + self.fibre_r[j_idx].view(-1,1,1)
 
         if self.apply_pbc:
             # pbc x
@@ -70,27 +88,32 @@ class RVE:
             dists_x = torch.norm((self.fibre_coords[i_idx_x, :, None, :] -
                                 torch.tensor([self.domain_size[0],0,0], device=self.device)) -
                                 self.fibre_coords[j_idx_x, None, :, :], dim=-1)
+            expected_dists_x = self.fibre_r[i_idx_x].view(-1,1,1) + self.fibre_r[j_idx_x].view(-1,1,1)
             # pbc y
             i_idx_y, j_idx_y = intersections["y_pbc"].nonzero(as_tuple=True)
             dists_y = torch.norm((self.fibre_coords[i_idx_y, :, None, :] -
                                 torch.tensor([0,self.domain_size[1],0], device=self.device)) -
                                 self.fibre_coords[j_idx_y, None, :, :], dim=-1)
+            expected_dists_y = self.fibre_r[i_idx_y].view(-1,1,1) + self.fibre_r[j_idx_y].view(-1,1,1)
             # pbc xy
             i_idx_xy, j_idx_xy = intersections["xy_pbc"].nonzero(as_tuple=True)
             dists_xy = torch.norm((self.fibre_coords[i_idx_xy, :, None, :] -
                                 torch.tensor([self.domain_size[0],self.domain_size[1],0], device=self.device)) -
                                 self.fibre_coords[j_idx_xy, None, :, :], dim=-1)
+            expected_dists_xy = self.fibre_r[i_idx_xy].view(-1,1,1) + self.fibre_r[j_idx_xy].view(-1,1,1)
             # pbc yx
             i_idx_yx, j_idx_yx = intersections["yx_pbc"].nonzero(as_tuple=True)
             dists_yx = torch.norm((self.fibre_coords[i_idx_yx, :, None, :] -
                                 torch.tensor([self.domain_size[0],0,0], device=self.device)) -
                                 (self.fibre_coords[j_idx_yx, None, :, :] -
                                 torch.tensor([0,self.domain_size[1],0], device=self.device)), dim=-1)
+            expected_dists_yx = self.fibre_r[i_idx_yx].view(-1,1,1) + self.fibre_r[j_idx_yx].view(-1,1,1)
             # concatenate all distances
             dists = torch.cat([dists, dists_x, dists_y, dists_xy, dists_yx], dim=0)
+            expected_dists = torch.cat([expected_dists, expected_dists_x, expected_dists_y, expected_dists_xy, expected_dists_yx], dim=0)
 
         # penalty
-        d_l = F.relu(self.fibre_diameter - dists)
+        d_l = F.relu(expected_dists - dists)
         penalties = 0.5 * self.k_collision * d_l*d_l
 
         loss = penalties.sum()
@@ -141,14 +164,26 @@ class RVE:
     def boundary_loss(self):
         """
         self.fibre_coords: (n_fibres, resolution, 3)
+        self.fibre_r: (n_fibres,) tensor of fibre radii
         self.domain_size: (3,) tensor/list specifying [x_max, y_max, z_max]
         self.k_boundary: scalar
         """
-        # TODO THIS DOESNT TAKE INTO ACCOUNT THE FIBRE RADIUS
-        # lower violations: values < 0
-        lower_violation = torch.clamp(-self.fibre_coords, min=0.0)
-        # upper violations: values > domain_size
-        upper_violation = torch.clamp(self.fibre_coords - self.domain_size, min=0.0)
+        if self.apply_pbc:
+            # lower violations: values < 0
+            lower_violation = torch.clamp(-self.fibre_coords, min=0.0)
+            # upper violations: values > domain_size
+            upper_violation = torch.clamp(self.fibre_coords - self.domain_size, min=0.0)
+        else:
+            # fibre radii matter only in x and y directions
+            fibre_r_offset = torch.stack([
+                self.fibre_r,  # x
+                self.fibre_r,  # y
+                torch.zeros_like(self.fibre_r)  # z
+            ], dim=1).unsqueeze(1)  # (n_fibres, 1, 3)
+            # lower violations: values < fibre_r
+            lower_violation = torch.clamp(fibre_r_offset - self.fibre_coords, min=0.0)
+            # upper violations: values > domain_size - fibre_r
+            upper_violation = torch.clamp(self.fibre_coords - (self.domain_size - fibre_r_offset), min=0.0)
         # total violation per coordinate
         violations = lower_violation + upper_violation  # shape (n_fibres, resolution, 3)
         loss = 0.5 * self.k_boundary * (violations*violations).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)

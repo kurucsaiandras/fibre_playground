@@ -2,14 +2,14 @@ import torch
 import poisson_disc as pd
 import os
 
-def get_bounding_boxes(points, radius):
+def get_bounding_boxes(points, radii):
     """
     points: (n_fibres, resolution, 3)
-    radius: scalar
+    radii: scalar or (n_fibres,) tensor of fibre radii
     returns: (n_fibres, 2, 3) tensor of bounding boxes: p_min, p_max
     """
-    min_coords = points - radius
-    max_coords = points + radius
+    min_coords = points - radii.view(-1, 1, 1)
+    max_coords = points + radii.view(-1, 1, 1)
     boxes = torch.stack([min_coords.min(dim=1).values, max_coords.max(dim=1).values], dim=1)
     return boxes
 
@@ -55,6 +55,19 @@ def get_bbox_intersections(boxes, domain_size, apply_pbc):
 
     return intersections
 
+def generate_radii(n_fibres, config, device):
+    """
+    Generate fibre radii with normal distribution, clipped to positive values.
+    returns: (n_fibres,) tensor of initial radii, (n_fibres,) tensor of target radii
+    """
+    initial_r = config.initialization.generate.fibre_r_initial
+    mean_r = config.evolution.fibre_r_target
+    std_r = config.evolution.fibre_r_std
+    r_initial = torch.full((n_fibres,), initial_r, device=device)
+    r_target = torch.randn(n_fibres, device=device) * std_r + mean_r
+    r_target = torch.clamp(r_target, min=0.005)  # avoid non-positive radii
+    return r_initial, r_target
+
 def generate_fibres_poisson(config, device):
     """
     Generate fibres in a cubic domain of given size.
@@ -67,7 +80,7 @@ def generate_fibres_poisson(config, device):
     - step_lengths: (n_fibres, 1) tensor of step lengths between points. used as rest lengths for springs.
     """
     # extract params from config
-    radius = config.initialization.generate.fibre_diameter_initial * 0.5
+    radius = config.initialization.generate.fibre_r_initial
     num_points = config.initialization.generate.resolution
     std_angle = config.initialization.generate.angle_std_dev
     domain_size = config.initialization.generate.domain_size_initial

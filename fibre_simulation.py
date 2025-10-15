@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import logger
 import os
 import time
@@ -104,18 +103,8 @@ class FibreSimulation:
             
         # adjust configuration if no collisions
         if self.losses["collision"] <= self.config.evolution.collision_threshold:
-            # first, increase fibre diameter until target
-            if self.rve.fibre_diameter < self.config.evolution.fibre_diameter_final:
-                self.rve.fibre_diameter += self.config.evolution.fibre_diameter_step
-            # then, decrease domain size until target
-            elif self.rve.domain_size[0] > self.config.evolution.domain_size_final[0]:
-                self.rve.domain_size[0] -= 0.1
-                self.rve.domain_size[1] -= 0.1
-                # subtract 0.05 from x and y of points
-                self.rve.fibre_coords.data[:, :, 0] -= 0.05
-                self.rve.fibre_coords.data[:, :, 1] -= 0.05
-            # finally, decrease collision threshold until zero for final polishing
-            else:
+            at_target = self.rve.evolve()
+            if at_target:
                 if self.config.evolution.collision_threshold > 0:
                     self.config.evolution.collision_threshold = 0
                 else:

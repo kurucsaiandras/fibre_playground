@@ -1,11 +1,11 @@
 initialization:
-  method: load # or load
+  method: generate # or load
   generate:
     method: random # or poisson
     num_of_fibres: 200
     poisson_radius: 0.55
     resolution: 30
-    fibre_diameter_initial: 0.2
+    fibre_r_initial: 0.1
     domain_size_initial: [10.0, 10.0, 10.0]
     angle_std_dev: 0.05
   load:
@@ -20,10 +20,11 @@ spring_system:
 
 evolution:
   max_iterations: 500000
-  fibre_diameter_final: 0.5
-  fibre_diameter_step: 0.01
-  domain_size_final: [8.0, 8.0, 10.0]
-  domain_size_step: 0.1
+  fibre_r_target: 0.25
+  fibre_r_steps: 30
+  fibre_r_std: 0.025
+  domain_size_target: [8.0, 8.0, 10.0]
+  domain_size_steps: 20
   collision_threshold: 0
   apply_pbc: True
 
