@@ -136,11 +136,28 @@ def generate_fibres_random(config, device):
     coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
     # Base direction (0, 0, 1) with Gaussian perturbations in x/y
-    dx = torch.randn(n_fibres, 1, device=device) * std_angle
-    dy = torch.randn(n_fibres, 1, device=device) * std_angle
-    dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
-    dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
-    dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+    # NOTE: This is not an actual normal distribution of angles in 3D.
+    # This gives a slightly flatter distribution for the initial projected
+    # angles in the xz and yz planes than using spherical coordinates.
+    # Using spherical coordinates gives a more 'spiky' distribution that
+    # resembles the distrib. in converged stages. (although using this
+    # method also converges to the same results)
+    
+    #dx = torch.randn(n_fibres, 1, device=device) * std_angle
+    #dy = torch.randn(n_fibres, 1, device=device) * std_angle
+    #dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
+    #dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
+    #dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+
+    # Draw inclination angle from normal distribution (angle with z axis)
+    thetas = torch.randn(n_fibres, device=device) * std_angle
+    # Draw azimuthal angle from uniform distribution (rotate around z axis)
+    phis = torch.rand(n_fibres, device=device) * torch.pi # only until pi as theta can be negative
+    # Calculate coordinates of direction vectors
+    dx = torch.sin(thetas) * torch.cos(phis)
+    dy = torch.sin(thetas) * torch.sin(phis)
+    dz = torch.cos(thetas)
+    dirs = torch.stack([dx, dy, dz], dim=1)  # (n_fibres, 3) already normalized
 
     # Calculate lengths until they hit the top (z = domain_size)
     lengths = (domain_size[2] - z0) / dirs[:, 2:3]  # (n_fibres, 1)

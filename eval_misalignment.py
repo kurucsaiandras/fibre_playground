@@ -16,6 +16,7 @@ def main():
     fibre_coords = model["fibre_coords"]  # (n_fibres, n_points, 3)
     domain_size = model["domain_size"]
     fibre_r = model["fibre_r"]
+    step = model["step"]
     volume_ratio = torch.pow(fibre_r, 2).sum() * math.pi / (domain_size[0] * domain_size[1])
 
     # Vectors between consecutive points
