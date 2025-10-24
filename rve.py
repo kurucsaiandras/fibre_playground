@@ -51,10 +51,11 @@ class RVE:
             self.fibre_r = self.fibre_r + self.r_incr
             return False
         # then, decrease domain size until target (account for float precision)
-        if torch.any(self.domain_size > self.domain_size_target + 1e-6):
-            self.domain_size = self.domain_size + self.domain_size_incr
-            self.fibre_coords.data[:, :, 0] += self.domain_size_incr[0] * 0.5
-            self.fibre_coords.data[:, :, 1] += self.domain_size_incr[1] * 0.5
+        if torch.any(self.domain_size > self.domain_size_target + 1e-4):
+            proportion = (self.domain_size + self.domain_size_incr) / self.domain_size
+            self.domain_size *= proportion
+            self.fibre_coords.data[:, :, 0] *= proportion[0]
+            self.fibre_coords.data[:, :, 1] *= proportion[1]
             return False
         return True
 

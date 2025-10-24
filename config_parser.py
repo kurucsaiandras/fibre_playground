@@ -52,6 +52,11 @@ class OptimizationConfig:
     learning_rate: float
     grad_clipping: bool
     max_grad_norm: float
+    line_loss: bool
+    alternate_phases: bool
+    max_iter_per_phase: int
+    cumulative_loss_threshold: float
+    moving_average_window: int
 
 @dataclass
 class StatsConfig:
