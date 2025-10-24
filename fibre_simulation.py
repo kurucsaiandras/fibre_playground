@@ -20,6 +20,14 @@ class FibreSimulation:
         self._setup_optimizer()
         self.progress_logger = logger.Logger(self.job_name, "progress")
         self.rve_saves_logger = logger.Logger(self.job_name, "rve_saves")
+        self.milestone = False
+        if self.config.optimization.alternate_phases:
+            self.optim_phase = 'collision'  # or 'all'
+            self.current_iter_per_phase = 0
+            self.avg_window = self.config.optimization.moving_average_window
+            self.moving_avg = torch.zeros(self.avg_window*2, device=device)
+            self.min_loss = torch.inf
+            self.fibre_coords_checkpoint = self.rve.fibre_coords.clone()
 
         os.makedirs(f"results/{self.job_name}/rve", exist_ok=True)
         shutil.copy(f"config/{config_name}.yaml", f"results/{self.job_name}/used_config.yaml")
@@ -40,12 +48,64 @@ class FibreSimulation:
     def closure(self):
         self.optimizer.zero_grad()
 
+        if self.config.optimization.line_loss:
+            self.losses["collision"] = self.rve.collision_line_loss()
+        else:
+            self.losses["collision"] = self.rve.collision_loss()
+        self.losses["boundary"] = self.rve.boundary_loss()
         self.losses["length"] = self.rve.length_loss()
         self.losses["curvature"] = self.rve.curvature_loss()
-        self.losses["boundary"] = self.rve.boundary_loss()
-        self.losses["collision"] = self.rve.collision_loss()
 
-        loss_sum = (sum(self.losses.values()))
+        if self.config.optimization.alternate_phases:
+
+            if self.optim_phase == 'collision':
+
+                self.current_iter_per_phase += 1
+                loss_sum = self.losses["collision"] #+ self.losses["boundary"]
+
+                if self.losses["collision"] <= self.config.evolution.collision_threshold:
+                    self.optim_phase = 'all'
+                    print(f"Switching to 'all' optimization phase at step {self.current_step}")
+                    print(f"Took {self.current_iter_per_phase} iterations in 'collision' phase")
+                    self.current_iter_per_phase = 0
+                    self.milestone = True
+                    self.moving_avg = torch.zeros(self.avg_window*2, device=self.device)
+                    self.min_loss = torch.inf
+                    #for param_group in self.optimizer.param_groups:
+                    #    param_group['lr'] = 0.01
+
+            elif self.optim_phase == 'all':
+
+                loss_sum = (sum(self.losses.values()))
+
+                if loss_sum < self.min_loss:
+                    self.min_loss = loss_sum
+                    self.fibre_coords_checkpoint = self.rve.fibre_coords.clone()
+
+                if self.current_iter_per_phase < self.avg_window*2:
+                    self.moving_avg[self.current_iter_per_phase] = loss_sum
+                else:
+                    self.moving_avg = torch.roll(self.moving_avg, -1)
+                    self.moving_avg[-1] = loss_sum
+
+                self.current_iter_per_phase += 1
+
+                if (loss_sum < self.config.optimization.cumulative_loss_threshold
+                    or self.current_iter_per_phase == self.config.optimization.max_iter_per_phase
+                    or self.moving_avg[:self.avg_window].sum() < self.moving_avg[self.avg_window:].sum()):
+                    with torch.no_grad():
+                        self.rve.fibre_coords.data.copy_(self.fibre_coords_checkpoint)
+                        self.rve.fibre_coords.grad = None
+                    self.optim_phase = 'collision'
+                    print(f"Switching to 'collision' optimization phase at step {self.current_step}")
+                    print(f"Took {self.current_iter_per_phase} iterations in 'all' phase")
+                    self.current_iter_per_phase = 0
+                    #for param_group in self.optimizer.param_groups:
+                    #    param_group['lr'] = 0.001
+        else:
+            loss_sum = (sum(self.losses.values()))
+            if self.losses["collision"] <= self.config.evolution.collision_threshold:
+                self.milestone = True
 
         if not torch.isfinite(loss_sum):
             print("Non-finite loss in closure -> aborting")
@@ -73,14 +133,15 @@ class FibreSimulation:
         with torch.no_grad():
             fibres_params.grad = g_total'''
 
-        # save params if no collisions before updating the points
-        if self.losses["collision"] <= self.config.evolution.collision_threshold:
+        # save params if milestone before updating the points
+        if self.milestone:
             self.rve.save(self.job_name, self.current_step, time.time()-self.global_start_time)
             self.rve_saves_logger.log(self, time.time() - self.global_start_time)
         return loss_sum
 
     def step(self):
         self.current_step += 1
+        self.milestone = False
         self.optimizer.step(self.closure)
         
         # gradient clipping to avoid explosion
@@ -101,8 +162,8 @@ class FibreSimulation:
             print("Parameters became non-finite at step", self.current_step, "-> aborting")
             return False
             
-        # adjust configuration if no collisions
-        if self.losses["collision"] <= self.config.evolution.collision_threshold:
+        # adjust configuration if milestone
+        if self.milestone:
             at_target = self.rve.evolve()
             if at_target:
                 if self.config.evolution.collision_threshold > 0:

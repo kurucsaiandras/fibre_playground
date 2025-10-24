@@ -16,7 +16,7 @@ spring_system:
   k_length: 0.1
   k_curvature: 0.1
   k_boundary: 1.0
-  k_collision: 100.0
+  k_collision: 10.0
 
 evolution:
   max_iterations: 500000
@@ -33,6 +33,12 @@ optimization:
   learning_rate: 0.01
   grad_clipping: False
   max_grad_norm: 1.0
+  # line loss converges better with alternating phases
+  line_loss: True
+  alternate_phases: True
+  max_iter_per_phase: 2000 # for the joint loss optimization
+  cumulative_loss_threshold: 0.01
+  moving_average_window: 300
 
 stats:
   to_plot: False
