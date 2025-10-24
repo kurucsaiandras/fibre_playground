@@ -1,0 +1,39 @@
+initialization:
+  method: load # or load
+  generate:
+    method: random # or poisson
+    num_of_fibres: 10
+    poisson_radius: 0.55
+    resolution: 5
+    fibre_r_initial: 0.1
+    domain_size_initial: [1.0, 1.0, 1.0]
+    angle_std_dev: 0.05
+  load:
+    name: nano_run
+    step: 0
+
+spring_system:
+  k_length: 0.1
+  k_curvature: 0.1
+  k_boundary: 1.0
+  k_collision: 100.0
+
+evolution:
+  max_iterations: 500000
+  fibre_r_target: 0.25
+  fibre_r_steps: 30
+  fibre_r_std: 0.025
+  domain_size_target: [8.0, 8.0, 10.0]
+  domain_size_steps: 20
+  collision_threshold: 0
+  apply_pbc: False
+
+optimization:
+  optimizer: adam # or lbfgs
+  learning_rate: 0.01
+  grad_clipping: False
+  max_grad_norm: 1.0
+
+stats:
+  to_plot: True
+  logging_freq: 100
