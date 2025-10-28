@@ -16,7 +16,7 @@ spring_system:
   k_length: 0.1
   k_curvature: 0.1
   k_boundary: 1.0
-  k_collision: 100.0
+  k_overlap: 100.0
 
 evolution:
   max_iterations: 500000
@@ -25,14 +25,22 @@ evolution:
   fibre_r_std: 0.025
   domain_size_target: [8.0, 8.0, 10.0]
   domain_size_steps: 20
-  collision_threshold: 0
+  overlap_threshold: 0
   apply_pbc: True
 
 optimization:
-  optimizer: adam # or lbfgs
+  joint_optimizer: adam # adam or lbfgs
   learning_rate: 0.01
   grad_clipping: False
   max_grad_norm: 1.0
+  # line loss converges better with alternating phases
+  line_loss: True
+  alternate_phases: True
+  overlap_optimizer: sgd # sgd or own
+  max_iter_per_phase: 2000 # for the joint loss optimization
+  cumulative_loss_threshold: 0.01
+  moving_average_window: 300
+  reset_optimizers: False
 
 stats:
   to_plot: True

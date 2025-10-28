@@ -33,7 +33,7 @@ class SpringSystemConfig:
     k_length: float
     k_curvature: float
     k_boundary: float
-    k_collision: float
+    k_overlap: float
 
 @dataclass
 class EvolutionConfig:
@@ -43,20 +43,22 @@ class EvolutionConfig:
     fibre_r_std: float
     domain_size_target: List[float]
     domain_size_steps: float
-    collision_threshold: float
+    overlap_threshold: float
     apply_pbc: bool
 
 @dataclass
 class OptimizationConfig:
-    optimizer: str
+    joint_optimizer: str
     learning_rate: float
     grad_clipping: bool
     max_grad_norm: float
     line_loss: bool
     alternate_phases: bool
+    overlap_optimizer: str
     max_iter_per_phase: int
     cumulative_loss_threshold: float
     moving_average_window: int
+    reset_optimizers: bool
 
 @dataclass
 class StatsConfig:

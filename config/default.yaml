@@ -1,5 +1,5 @@
 initialization:
-  method: generate # or load
+  method: load # or load
   generate:
     method: random # or poisson
     num_of_fibres: 500
@@ -9,14 +9,14 @@ initialization:
     domain_size_initial: [10.0, 10.0, 10.0]
     angle_std_dev: 0.05
   load:
-    name: test_run
+    name: benchmark_case
     step: 0
 
 spring_system:
   k_length: 0.1
   k_curvature: 0.1
   k_boundary: 1.0
-  k_collision: 10.0
+  k_overlap: 10.0
 
 evolution:
   max_iterations: 500000
@@ -25,21 +25,23 @@ evolution:
   fibre_r_std: 0.01
   domain_size_target: [6.8, 6.8, 10.0]
   domain_size_steps: 30
-  collision_threshold: 0
+  overlap_threshold: 0
   apply_pbc: False
 
 optimization:
-  optimizer: adam # or lbfgs
+  joint_optimizer: adam # adam or lbfgs
   learning_rate: 0.01
   grad_clipping: False
   max_grad_norm: 1.0
   # line loss converges better with alternating phases
   line_loss: True
   alternate_phases: True
+  overlap_optimizer: sgd # sgd or own
   max_iter_per_phase: 2000 # for the joint loss optimization
   cumulative_loss_threshold: 0.01
   moving_average_window: 300
+  reset_optimizers: False
 
 stats:
-  to_plot: False
+  to_plot: True
   logging_freq: 100

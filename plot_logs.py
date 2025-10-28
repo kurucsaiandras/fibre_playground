@@ -15,7 +15,7 @@ total_loss = df["total"].to_numpy()
 length_loss = df["length"].to_numpy()
 curvature_loss = df["curvature"].to_numpy()
 boundary_loss = df["boundary"].to_numpy()
-collision_loss = df["collision"].to_numpy()
+overlap_loss = df["overlap"].to_numpy()
 volume_ratio = df["volume_ratio"].to_numpy()
 
 # --- Find indices where volume_ratio changes ---
@@ -29,7 +29,7 @@ plt.plot(steps, total_loss, label="Total Loss", color="black", linewidth=2)
 plt.plot(steps, length_loss, label="Length")
 plt.plot(steps, curvature_loss, label="Curvature")
 plt.plot(steps, boundary_loss, label="Boundary")
-plt.plot(steps, collision_loss, label="Collision")
+plt.plot(steps, overlap_loss, label="Overlap")
 
 # Log scale
 plt.yscale("log")

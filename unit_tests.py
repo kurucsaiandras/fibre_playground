@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-def collision_line_loss(fibre_coords, fibre_r, k_collision, i_idx, j_idx):
+def overlap_line_loss(fibre_coords, fibre_r, k_overlap, i_idx, j_idx):
     d_i = fibre_coords[i_idx, 1:, :] - fibre_coords[i_idx, :-1, :]  # (n_ij, res-1, 3)
     d_j = fibre_coords[j_idx, 1:, :] - fibre_coords[j_idx, :-1, :]  # (n_ij, res-1, 3)
 
@@ -45,7 +45,7 @@ def collision_line_loss(fibre_coords, fibre_r, k_collision, i_idx, j_idx):
 
     # penalty
     d_l = F.relu(expected_dists - dists)
-    penalties = 0.5 * k_collision * d_l*d_l
+    penalties = 0.5 * k_overlap * d_l*d_l
 
     loss = penalties.sum()
     return loss
@@ -65,11 +65,11 @@ def main():
                                  [2.0, 0.0, 1.0],
                                  [3.0, 0.0, 1.0]]])  # (2 fibres, 3 points, 3D)
     fibre_r = torch.tensor([0.6, 0.6])  # (2 fibres,)
-    k_collision = 10.0
+    k_overlap = 10.0
     i_idx = torch.tensor([0])
     j_idx = torch.tensor([1])
-    loss = collision_line_loss(fibre_coords, fibre_r, k_collision, i_idx, j_idx)
-    print(f"Collision line loss: {loss.item():.4f}")
+    loss = overlap_line_loss(fibre_coords, fibre_r, k_overlap, i_idx, j_idx)
+    print(f"Overlap line loss: {loss.item():.4f}")
 
     
 

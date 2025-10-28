@@ -10,6 +10,6 @@
  - Try anisotropic misalignment
  - Try BFGS instead of gradient descent (and compare)
     - Maybe other convergence methods as well
- - Investigate option for hard(er) collision constraints
+ - Investigate option for hard(er) overlap constraints
     - Look into Lagrange multipliers
  - Implement plotters for .csv statistics
