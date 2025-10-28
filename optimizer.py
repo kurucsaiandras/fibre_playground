@@ -47,17 +47,13 @@ class Optimizer:
             self.phase = 'joint'
             self.moving_avg = torch.zeros(self.avg_window*2, device=self.rve.device)
             self.min_loss = torch.inf
-            if self.config.reset_optimizers:
-                self.current - self._init_joint()
-            else:
-                self.current = self.joint
+            if self.config.reset_optimizers: self._init_joint()
+            self.current = self.joint
         elif self.phase == 'joint':
             print(f"Took {self.phase_iter} iterations in 'joint' phase, switching to 'overlap'")
             self.phase = 'overlap'
-            if self.config.reset_optimizers:
-                self.current = self._init_overlap()
-            else:
-                self.current = self.overlap
+            if self.config.reset_optimizers: self._init_overlap()
+            self.current = self.overlap
         self.phase_iter = 0
 
     def save_checkpoint(self):

@@ -17,7 +17,7 @@ class Logger:
         n_fibres = simulation.rve.fibre_coords.shape[0]
         fibre_r_mean = simulation.rve.fibre_r.mean().item()
         domain_size = simulation.rve.domain_size.cpu().numpy()
-        if simulation.optimizer.phase == 'collision': phase = 0
+        if simulation.optimizer.phase == 'overlap': phase = 0
         elif simulation.optimizer.phase == 'joint': phase = 1
         with open(f"results/{self.job_name}/logs/{self.file_name}.csv", "a") as f:
             fibre_to_volume_ratio = simulation.rve.get_fibre_to_volume_ratio()
