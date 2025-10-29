@@ -20,6 +20,7 @@ class FibreSimulation:
         self.optimizer = Optimizer(self.config.optimization, self.rve)
         self.progress_logger = logger.Logger(self.job_name, "progress")
         self.rve_saves_logger = logger.Logger(self.job_name, "rve_saves")
+        self.refine_phase = False
 
         os.makedirs(f"results/{self.job_name}/rve", exist_ok=True)
         shutil.copy(f"config/{config_name}.yaml", f"results/{self.job_name}/used_config.yaml")
@@ -35,14 +36,21 @@ class FibreSimulation:
         self.rve_saves_logger.log(self, time.time() - self.global_start_time)
         at_target = self.rve.evolve()
         if at_target:
-            if self.config.optimization.overlap_threshold > 0:
-                self.config.optimization.overlap_threshold = 0
-            else:
+            do_continue = False
+            if self.config.evolution.overlap_threshold > 0:
+                self.config.evolution.overlap_threshold = 0
+                do_continue = True
+            if self.config.optimization.refine_phase == True and self.refine_phase == False:
+                self.refine_phase = True
+                do_continue = True
+            if not do_continue:
                 print("Reached target configuration -> stopping")
                 return False
         return True
 
     def step(self):
+        self.optimizer.loss()
+
         self.current_step += 1
         if self.current_step % self.config.stats.logging_freq == 0:
             elapsed = (time.time() - self.step_start_time) / self.config.stats.logging_freq
@@ -50,8 +58,6 @@ class FibreSimulation:
             if self.config.stats.to_plot:
                 self.plotter.update(self.rve)
             self.step_start_time = time.time()
-        
-        self.optimizer.loss()
 
         if self.config.optimization.alternate_phases:
             self.optimizer.phase_iter += 1

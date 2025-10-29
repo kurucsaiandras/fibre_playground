@@ -2,6 +2,8 @@ import torch
 
 class Optimizer:
     def __init__(self, config, rve):
+        if config.overlap_optimizer == 'same' and config.reset_optimizers:
+            raise Exception("overlap_optimizer = 'same' and reset_optimizers = True should not be used together!")
         self.config = config
         self.losses = {}
         self.loss_sum = 0
@@ -28,7 +30,10 @@ class Optimizer:
                                                max_iter=10, history_size=10)
             
     def _init_overlap(self):
-        self.overlap = torch.optim.SGD([self.rve.fibre_coords], lr=1e-3)
+        if self.config.overlap_optimizer == 'same':
+            self.overlap = self.joint
+        elif self.config.overlap_optimizer == 'sgd':
+            self.overlap = torch.optim.SGD([self.rve.fibre_coords], lr=1e-3)
 
     def loss(self):
         if self.config.line_loss:
@@ -49,11 +54,17 @@ class Optimizer:
             self.min_loss = torch.inf
             if self.config.reset_optimizers: self._init_joint()
             self.current = self.joint
+            if self.config.overlap_optimizer == 'same':
+                for param_group in self.current.param_groups:
+                        param_group['lr'] = self.config.learning_rate
         elif self.phase == 'joint':
             print(f"Took {self.phase_iter} iterations in 'joint' phase, switching to 'overlap'")
             self.phase = 'overlap'
             if self.config.reset_optimizers: self._init_overlap()
             self.current = self.overlap
+            if self.config.overlap_optimizer == 'same':
+                for param_group in self.current.param_groups:
+                        param_group['lr'] = 0.001
         self.phase_iter = 0
 
     def save_checkpoint(self):

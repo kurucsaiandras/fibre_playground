@@ -41,6 +41,7 @@ optimization:
   cumulative_loss_threshold: 0.01
   moving_average_window: 300
   reset_optimizers: False
+  refine_phase: True
 
 stats:
   to_plot: True

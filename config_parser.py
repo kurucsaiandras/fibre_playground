@@ -59,6 +59,7 @@ class OptimizationConfig:
     cumulative_loss_threshold: float
     moving_average_window: int
     reset_optimizers: bool
+    refine_phase: bool
 
 @dataclass
 class StatsConfig:
