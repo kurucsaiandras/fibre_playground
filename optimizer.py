@@ -90,6 +90,11 @@ class Optimizer:
                     or self.moving_avg[:self.avg_window].sum() < self.moving_avg[self.avg_window:].sum())
         else: raise Exception(f"Tried to evaluate joint criteria in phase '{self.phase}'")
         
+    def reset_joint_criteria(self):
+        self.phase_iter = 0
+        self.moving_avg = torch.zeros(self.avg_window*2, device=self.rve.device)
+        self.min_loss = torch.inf
+    
     def lbfgs_closure(self):
         self.current.zero_grad()
         losses = {}
