@@ -3,6 +3,7 @@ import numpy as np
 from scipy.spatial import Voronoi
 import matplotlib.pyplot as plt
 import os
+import utils
 
 def get_slice(fibres, z):
     """
@@ -104,33 +105,35 @@ def ripleys_k(points, hs):
     k_values = (area / (n * (n - 1))) * counts
     return k_values
 
-def load_fibres(file_name, domain_size, fibre_diameter):
+def load_fibres(file_name):
     """
     Load fibre data from a file and normalize it to fit within a unit cube.
     
     Args:
         file_name (str): The path to the file containing fibre data.
-        domain_size (list or np array): A list or array of shape (3,) specifying the size of the domain in x, y, z.
-        fibre_diameter (float): The diameter of the fibres.
     Returns:
         np array: A tensor of shape (N, M, 3) representing N fibres with M points each in 3D space.
     """
-    fibres = torch.load(file_name).to("cpu").numpy()  # (n_fibres, n_points, 3)
-    n_fibres, n_points, _ = fibres.shape
+    model = torch.load(file_name)
+    fibre_coords = model["fibre_coords"].cpu().detach().numpy()
+    fibre_r = model["fibre_r"].cpu().numpy()
+    domain_size = model["domain_size"].cpu().numpy()
+    n_fibres, n_points, _ = fibre_coords.shape
     print(f"Loaded {n_fibres} fibres with {n_points} points each.")
-    # Shift by radius in x and y
-    fibres[:, :, 0] += fibre_diameter * 0.5
-    fibres[:, :, 1] += fibre_diameter * 0.5
     # Normalize to unit cube
-    fibres /= (domain_size + fibre_diameter)
-    return fibres
+    fibre_coords /= domain_size
+    return fibre_coords, domain_size, fibre_r
 
 def main():
-    domain_size = np.array([6.8, 6.8, 10.0])
-    fibre_diameter = 0.3
-    name = "fibre_sim_test"
-    fibres = load_fibres(f"models/{name}.pt", domain_size, fibre_diameter)
+    name = "fibre_sim_random"
+    step = None
+    if step is None:
+        path = utils.latest_rve(f"results/{name}/rve")
+    else:
+        path = f"results/{name}/rve/{step}.pt"
+    fibres, domain_size, fibre_r = load_fibres(path)
     save_figs = True
+    fibre_r_mean = np.mean(fibre_r)
 
     if save_figs:
         if not os.path.exists("figs"):
@@ -166,7 +169,7 @@ def main():
     # Compute Ripley's K function
     hs = np.linspace(0.01, 0.5, 50)
     # Divide hs by fibre radius for plotting
-    hs_norm = hs * (domain_size[0] + fibre_diameter) / (fibre_diameter * 0.5)
+    hs_norm = hs * (domain_size[0]) / fibre_r_mean
     k_values = ripleys_k(slice_points, hs)
     
     # Plot Ripley's K function
