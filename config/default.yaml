@@ -1,10 +1,10 @@
 initialization:
-  method: load # or load
+  method: generate # or load
   generate:
     method: random # or poisson
     num_of_fibres: 500
     poisson_radius: 0.35
-    resolution: 50
+    resolution: 20
     fibre_r_initial: 0.025
     domain_size_initial: [10.0, 10.0, 10.0]
     angle_std_dev: 0.05
@@ -16,7 +16,7 @@ spring_system:
   k_length: 0.1
   k_curvature: 0.1
   k_boundary: 1.0
-  k_overlap: 10.0
+  k_overlap: 1.0
 
 evolution:
   max_iterations: 500000
