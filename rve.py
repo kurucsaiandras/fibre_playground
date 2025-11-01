@@ -303,7 +303,7 @@ class RVE:
         penalties = 0.5 * self.k_overlap * d_l*d_l
 
         loss = penalties.sum()
-        return d_l.sum()
+        return loss
 
     def overlap_loss_inf_wall(self, alpha):
         boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_diameter*0.5)
