@@ -7,6 +7,8 @@ import config_parser
 from rve import RVE
 import threading
 from optimizer import Optimizer
+import descriptors_2d
+import descriptors_3d
 
 class FibreSimulation:
     def __init__(self, config_name, job_name, device):
@@ -93,6 +95,10 @@ class FibreSimulation:
         for _ in range(self.config.evolution.max_iterations + 1):
             continue_sim = self.step()
             if not continue_sim:
+                if self.config.stats.eval_statistics:
+                    descriptors_2d.eval(self.job_name, None, self.device, save_figs=True)
+                    descriptors_3d.eval(self.job_name, None, self.device, save_figs=True)
+                    self.progress_logger.plot(save_figs=True)
                 break
 
     def launch(self):

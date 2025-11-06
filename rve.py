@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import utils
 import math
+import os
 
 class RVE:
     def __init__(self, config, device):
@@ -23,16 +24,11 @@ class RVE:
                 self.fibre_coords, self.l0_length = utils.generate_fibres_random(config, device)
             self.fibre_r, self.fibre_r_target = utils.generate_radii(self.fibre_coords.shape[0], config, device)
         elif config.initialization.method == 'load':
-            state = torch.load(
-                f"results/{config.initialization.load.name}/rve/{config.initialization.load.step}.pt", map_location=device)
-            self.fibre_coords = state['fibre_coords']
-            self.l0_length = state['l0_length']
-            self.domain_size = state['domain_size']
-            self.fibre_r = state['fibre_r']
-            self.fibre_r_target = state['fibre_r_target']
-            if state['apply_pbc'] != self.apply_pbc:
+            self.load(config.initialization.load.name, config.initialization.load.step)
+            if config.evolution.apply_pbc != self.apply_pbc:
                 print("Warning: loaded RVE has different PBC setting than current config.")
-                print(f"Using setting from config: apply_pbc = {self.apply_pbc}")
+                print(f"Using setting from config: apply_pbc = {config.evolution.apply_pbc}")
+                self.apply_pbc = config.evolution.apply_pbc
         # make fibre_coords torch parameter
         self.fibre_coords = torch.nn.Parameter(self.fibre_coords)
         # calculate r step
@@ -41,23 +37,36 @@ class RVE:
         self.domain_size_target = torch.tensor(config.evolution.domain_size_target, device=device)
         self.domain_size_incr = (self.domain_size_target - self.domain_size) / config.evolution.domain_size_steps
         
-    def evolve(self):
-        """
-        Evolve the RVE by one step in fibre radii or domain size.
-        Returns True if evolution is complete (both radii and domain size reached target).
-        """
-        # first, increase fibre radii until target (account for float precision)
-        if torch.any(self.fibre_r < self.fibre_r_target - 1e-6):
-            self.fibre_r = self.fibre_r + self.r_incr
-            return False
-        # then, decrease domain size until target (account for float precision)
-        if torch.any(self.domain_size > self.domain_size_target + 1e-4):
-            proportion = (self.domain_size + self.domain_size_incr) / self.domain_size
-            self.domain_size *= proportion
-            self.fibre_coords.data[:, :, 0] *= proportion[0]
-            self.fibre_coords.data[:, :, 1] *= proportion[1]
-            return False
-        return True
+    @classmethod
+    def eval(cls, name, step, device):
+        """Alternative constructor for evaluation-only mode."""
+        self = cls.__new__(cls)  # create instance without calling __init__
+        self.device = device
+        self.load(name, step)
+        self.fibre_coords = self.fibre_coords.detach()  # to use in eval mode
+        return self
+    
+    @classmethod
+    def dummy(cls, fibre_coords):
+        """Alternative constructor for 3rd party data that only has fibre coordinates."""
+        self = cls.__new__(cls)  # create instance without calling __init__
+        self.fibre_coords = fibre_coords
+        self.l0_length = 0
+        self.domain_size = 0
+        self.fibre_r = 0
+        self.fibre_r_target = 0
+        self.apply_pbc = False
+        return self
+
+    def load(self, name, step):
+        path = f"results/{name}/rve/{step}.pt"
+        state = torch.load(path, map_location=self.device)
+        self.fibre_coords = state['fibre_coords']
+        self.l0_length = state['l0_length']
+        self.domain_size = state['domain_size']
+        self.fibre_r = state['fibre_r']
+        self.fibre_r_target = state['fibre_r_target']
+        self.apply_pbc = state['apply_pbc']
 
     def save(self, job_name, step, time):
         save_dict = {
@@ -70,6 +79,7 @@ class RVE:
             "fibre_r_target": self.fibre_r_target,
             "apply_pbc": self.apply_pbc
         }
+        os.makedirs(f"results/{job_name}/rve", exist_ok=True)
         torch.save(save_dict, f"results/{job_name}/rve/{step}.pt")
 
     def save_unit_test(self, job_name, step, time):
@@ -97,6 +107,24 @@ class RVE:
             "apply_pbc": self.apply_pbc
         }
         torch.save(save_dict, f"results/{job_name}/rve/{step}.pt")
+
+    def evolve(self):
+        """
+        Evolve the RVE by one step in fibre radii or domain size.
+        Returns True if evolution is complete (both radii and domain size reached target).
+        """
+        # first, increase fibre radii until target (account for float precision)
+        if torch.any(self.fibre_r < self.fibre_r_target - 1e-6):
+            self.fibre_r = self.fibre_r + self.r_incr
+            return False
+        # then, decrease domain size until target (account for float precision)
+        if torch.any(self.domain_size > self.domain_size_target + 1e-4):
+            proportion = (self.domain_size + self.domain_size_incr) / self.domain_size
+            self.domain_size *= proportion
+            self.fibre_coords.data[:, :, 0] *= proportion[0]
+            self.fibre_coords.data[:, :, 1] *= proportion[1]
+            return False
+        return True
 
     def get_fibre_to_volume_ratio(self):
         return torch.pow(self.fibre_r, 2).sum() * math.pi / (self.domain_size[0] * self.domain_size[1])

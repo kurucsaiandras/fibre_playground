@@ -4,12 +4,10 @@
 (not necessarily in importance order)
  - Implement statistical descriptors for evaluation
     - For alignment, 3D density distrib. and curvature as well
- - Use line segments (or even splines) to get actual closest distances
-    - Make sure the loss stays smooth when getting to zero
+    - Fibre trajectory plot
+    - Make the evaluation automatic after every model save, also plot csv files after finish
  - Investigate inhomogenous distribution, touching fibres, clustering
+    - The distributions in papers might be like that because of bundles -> ask
  - Try anisotropic misalignment
- - Try BFGS instead of gradient descent (and compare)
-    - Maybe other convergence methods as well
- - Investigate option for hard(er) overlap constraints
-    - Look into Lagrange multipliers
- - Implement plotters for .csv statistics
+    - By reducing the volume unevenly
+ - Try condition for angles on the edge, or just giving the fibres a bigger length than what fits

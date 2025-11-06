@@ -203,8 +203,8 @@ def get_offsets(domain_size_current, apply_pbc, device):
         ]
     return offsets
 
-def latest_rve(root: str) -> str:
-    """Return full path to the .pt file with the largest numeric name in a directory."""
+def latest_rve(root: str) -> int:
+    """Return the largest numeric step number among .pt files in a directory."""
     files = [
         f for f in os.listdir(root)
         if f.endswith(".pt") and f[:-3].isdigit()
@@ -213,5 +213,47 @@ def latest_rve(root: str) -> str:
         raise FileNotFoundError(f"No numeric .pt files found in {root}")
 
     # Sort numerically by filename (excluding ".pt")
-    latest_file = max(files, key=lambda f: int(f[:-3]))
-    return os.path.join(root, latest_file)
+    latest_step = max(int(f[:-3]) for f in files)
+    return latest_step
+
+def get_slice(fibres: torch.Tensor, z: float) -> torch.Tensor:
+    """
+    Get the intersection points of fibres with a horizontal plane at height z using PyTorch.
+    
+    Args:
+        fibres (torch.Tensor): Tensor of shape (N, M, 3) representing N fibres with M points each in 3D space.
+        z (float): Height of the horizontal plane.
+        
+    Returns:
+        torch.Tensor: Tensor of shape (K, 2) containing the projected intersection points (x, y).
+    """
+    # Compute start and end points of each segment
+    p1 = fibres[:, :-1, :]   # (N, M-1, 3)
+    p2 = fibres[:, 1:, :]    # (N, M-1, 3)
+
+    # Compute z differences
+    z1 = p1[..., 2]
+    z2 = p2[..., 2]
+
+    # Check if segment crosses the plane (one above, one below)
+    crosses = (z1 - z) * (z2 - z) < 0
+
+    # Parameter t for intersection points (only valid where crosses=True)
+    # Avoid division by zero
+    denom = (z2 - z1)
+    denom[denom == 0] = float('nan')  # prevent division by zero
+    t = (z - z1) / denom
+
+    # Compute intersection points
+    intersection_points = p1 + t.unsqueeze(-1) * (p2 - p1)
+    # Mask out non-crossing segments
+    intersection_points = intersection_points[crosses]
+    # Handle cases where points lie exactly on the plane
+    on_plane_points = torch.cat([p1[z1 == z], p2[z2 == z]], dim=0)
+    # Combine crossing and on-plane points
+    all_points = torch.cat([intersection_points, on_plane_points], dim=0)
+
+    if all_points.numel() == 0:
+        return torch.empty((0, 2), dtype=fibres.dtype, device=fibres.device)
+
+    return all_points[:, :2]  # return x, y only
