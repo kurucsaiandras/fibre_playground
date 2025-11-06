@@ -65,6 +65,7 @@ class OptimizationConfig:
 class StatsConfig:
     to_plot: bool
     logging_freq: int
+    eval_statistics: bool
 
 @dataclass
 class Config:

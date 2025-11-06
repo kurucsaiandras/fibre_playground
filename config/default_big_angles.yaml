@@ -1,20 +1,20 @@
 initialization:
-  method: generate # or load
+  method: load # or load
   generate:
     method: random # or poisson
     num_of_fibres: 500
     poisson_radius: 0.35
     resolution: 20
     fibre_r_initial: 0.025
-    domain_size_initial: [10.0, 10.0, 10.0]
-    angle_std_dev: 0.05
+    domain_size_initial: [12.0, 12.0, 10.0]
+    angle_std_dev: 0.15
   load:
-    name: benchmark_case
+    name: big_angles
     step: 0
 
 spring_system:
   k_length: 0.1
-  k_curvature: 0.1
+  k_curvature: 0.01
   k_boundary: 1.0
   k_overlap: 1.0
 
@@ -23,7 +23,7 @@ evolution:
   fibre_r_target: 0.15
   fibre_r_steps: 30
   fibre_r_std: 0.01
-  domain_size_target: [6.8, 6.8, 10.0]
+  domain_size_target: [8.0, 8.0, 10.0]
   domain_size_steps: 30
   overlap_threshold: 0
   apply_pbc: False
