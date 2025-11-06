@@ -12,4 +12,7 @@ CONFIG="default"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 
-python ./fibre_simulation.py --job_name $NAME --config $CONFIG
+N=5
+for ((i=1; i<=N; i++)); do
+    python ./fibre_simulation.py --job_name "${NAME}_${i}" --config $CONFIG
+done
