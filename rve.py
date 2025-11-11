@@ -47,14 +47,16 @@ class RVE:
         return self
     
     @classmethod
-    def dummy(cls, fibre_coords):
+    def external(cls, fibre_coords, radius, downsample):
         """Alternative constructor for 3rd party data that only has fibre coordinates."""
         self = cls.__new__(cls)  # create instance without calling __init__
         self.fibre_coords = fibre_coords
+        if downsample:
+            self.fibre_coords = self.fibre_coords[:, ::20, :] # assuming apx 900 points, and we want apx 40
         self.l0_length = 0
-        self.domain_size = 0
-        self.fibre_r = 0
-        self.fibre_r_target = 0
+        self.domain_size = torch.tensor([fibre_coords[:,:,0].max(), fibre_coords[:,:,1].max(), fibre_coords[:,:,2].max()], device=fibre_coords.device)
+        self.fibre_r = torch.full((fibre_coords.shape[0],), radius, device=fibre_coords.device)
+        self.fibre_r_target = self.fibre_r.clone()
         self.apply_pbc = False
         return self
 

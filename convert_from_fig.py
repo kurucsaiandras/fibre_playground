@@ -43,5 +43,5 @@ fibre_coords = torch.tensor(np.stack(line_arrays))  # shape: (N, resolution, 3)
 print(fibre_coords.shape)
 
 # Create dummy RVE
-rve = RVE.dummy(fibre_coords)
+rve = RVE.external(fibre_coords, radius=23.4*0.5, downsample=False) # got diameter value from paper
 rve.save("airtex", 0, 0)
