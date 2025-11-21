@@ -22,6 +22,8 @@ class RVE:
                 self.fibre_coords, self.l0_length = utils.generate_fibres_poisson(config, device)
             elif config.initialization.generate.method == 'random':
                 self.fibre_coords, self.l0_length = utils.generate_fibres_random(config, device)
+            elif config.initialization.generate.method == 'curl':
+                self.fibre_coords, self.l0_length = utils.generate_fibres_curl(config, device)
             self.fibre_r, self.fibre_r_target = utils.generate_radii(self.fibre_coords.shape[0], config, device)
         elif config.initialization.method == 'load':
             self.load(config.initialization.load.name, config.initialization.load.step)

@@ -4,7 +4,7 @@ from rve import RVE
 import torch
 from scipy.interpolate import interp1d
 
-file_path = "data/Mock-FibTraIncCol_mock.fig"
+file_path = "data/UD-FibTraIncCol_UD.fig"
 # Load figure data (with helpful struct unpacking)
 data = loadmat(file_path, squeeze_me=True, struct_as_record=False)
 fig_struct = data['hgS_070000']
@@ -43,5 +43,5 @@ fibre_coords = torch.tensor(np.stack(line_arrays))  # shape: (N, resolution, 3)
 print(fibre_coords.shape)
 
 # Create dummy RVE
-rve = RVE.external(fibre_coords, radius=23.4*0.5, downsample=False) # got diameter value from paper
-rve.save("airtex", 0, 0)
+rve = RVE.external(fibre_coords, radius=23.4*0.5, downsample=True) # got diameter value from paper
+rve.save("ud_ds", 0, 0)

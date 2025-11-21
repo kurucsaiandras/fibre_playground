@@ -1,7 +1,7 @@
 import torch
 import poisson_disc as pd
 import os
-import re
+import curl_noise
 
 def get_bounding_boxes(points, radii):
     """
@@ -114,6 +114,44 @@ def generate_fibres_poisson(config, device):
     fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
     return fibres, step_lengths
 
+def importance_sample(n_samples, domain_size, device):
+    shape = (5, 5, 0)
+    grid = curl_noise.generate_perlin_grid(shape, device=device)
+    res = 100
+    eval_points = torch.meshgrid(
+        torch.linspace(0, shape[0], steps=res, device=device),
+        torch.linspace(0, shape[1], steps=res, device=device),
+        torch.tensor([0.0], device=device)
+    )
+    eval_points = torch.stack(eval_points, dim=-1) # shape (res, res, 1, 3)
+    perlin_values = curl_noise.perlin_noised(grid, eval_points)
+    perlin_values_2d = perlin_values[:, :, 0, 0]
+    pdf = (perlin_values_2d - perlin_values_2d.min()).flatten()
+    pdf = pdf / pdf.max()
+    # saturate high and low values with smooth function
+    sat_strength = 5.0
+    pdf = torch.sigmoid((pdf - 0.5) * sat_strength)
+    pdf = pdf / pdf.sum()
+    indices = torch.multinomial(pdf, n_samples, replacement=True)
+    xs = indices % res
+    ys = indices // res
+    xs = xs.float() + torch.rand(n_samples, device=device)
+    ys = ys.float() + torch.rand(n_samples, device=device)
+    xs = xs / res * domain_size[0]
+    ys = ys / res * domain_size[1]
+    # plot for debugging
+    pdf = pdf.reshape(res, res)
+    import matplotlib.pyplot as plt
+    plt.figure()
+    plt.imshow(pdf.cpu().numpy(), extent=(0, domain_size[0], 0, domain_size[1]), origin='lower', cmap='gray')
+    plt.scatter(xs.cpu().numpy(), ys.cpu().numpy(), color='red', s=1, alpha=0.5)
+    plt.title("Importance Sampling Distribution")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.savefig("importance_sampling_debug.png", dpi=400)
+    plt.clf()
+    return xs.view(-1, 1), ys.view(-1, 1)
+
 def generate_fibres_random(config, device):
     """
     Generate n_fibres fibres in a cubic domain of given size.
@@ -130,10 +168,10 @@ def generate_fibres_random(config, device):
     std_angle = config.initialization.generate.angle_std_dev
     domain_size = config.initialization.generate.domain_size_initial
     # Random starting coordinates at z=0
-    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
-    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
+    x0, y0 = importance_sample(n_fibres, domain_size, device)
+    #x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
+    #y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
     z0 = torch.zeros(n_fibres, 1, device=device)
-    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
     # Base direction (0, 0, 1) with Gaussian perturbations in x/y
     # NOTE: This is not an actual normal distribution of angles in 3D.
@@ -143,21 +181,27 @@ def generate_fibres_random(config, device):
     # resembles the distrib. in converged stages. (although using this
     # method also converges to the same results)
     
-    #dx = torch.randn(n_fibres, 1, device=device) * std_angle
-    #dy = torch.randn(n_fibres, 1, device=device) * std_angle
-    #dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
-    #dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
-    #dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+    dx = torch.randn(n_fibres, 1, device=device) * std_angle
+    dy = torch.randn(n_fibres, 1, device=device) * std_angle
+    dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
+    x_ = domain_size[0]
+    #tilted_bundles = (0.1*x_ < x0) & (x0 < 0.15*x_) | (0.6*x_ < x0) & (x0 < 0.62*x_)
+    tilted_bundles = ((x0 / x_) % 0.04) < 0.02
+    dy = torch.where(tilted_bundles, dy+0.5, dy)
+    y0 = torch.where(tilted_bundles, y0-0.25*domain_size[1], y0)
+    dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
+    dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
     # Draw inclination angle from normal distribution (angle with z axis)
-    thetas = torch.randn(n_fibres, device=device) * std_angle
+    #thetas = torch.randn(n_fibres, device=device) * std_angle
     # Draw azimuthal angle from uniform distribution (rotate around z axis)
-    phis = torch.rand(n_fibres, device=device) * torch.pi # only until pi as theta can be negative
+    #phis = torch.rand(n_fibres, device=device) * torch.pi # only until pi as theta can be negative
     # Calculate coordinates of direction vectors
-    dx = torch.sin(thetas) * torch.cos(phis)
-    dy = torch.sin(thetas) * torch.sin(phis)
-    dz = torch.cos(thetas)
-    dirs = torch.stack([dx, dy, dz], dim=1)  # (n_fibres, 3) already normalized
+    #dx = torch.sin(thetas) * torch.cos(phis)
+    #dy = torch.sin(thetas) * torch.sin(phis)
+    #dz = torch.cos(thetas)
+    #dirs = torch.stack([dx, dy, dz], dim=1)  # (n_fibres, 3) already normalized
 
     # Calculate lengths until they hit the top (z = domain_size)
     lengths = (domain_size[2] - z0) / dirs[:, 2:3]  # (n_fibres, 1)
@@ -172,6 +216,46 @@ def generate_fibres_random(config, device):
     # Compute all points
     fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
     return fibres, step_lengths
+
+def generate_fibres_curl(config, device):
+    n_fibres = config.initialization.generate.num_of_fibres
+    num_points = config.initialization.generate.resolution
+    domain_size = config.initialization.generate.domain_size_initial
+    sh = 5 # size of noise field, if mapped coords are bigger, its tiled
+    shape = (sh, sh, sh)
+    grid = curl_noise.generate_perlin_grid(shape, device=device)
+    # remaps the scale of the noise function in each dimension
+    # we have to stretch the noise volume to be at lest domain_size
+    longest_side = max(domain_size)
+    f = longest_side / sh
+    remap_scale = torch.tensor([f, f, 2*f], device=device)
+    n_fibres = 2500
+    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
+    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
+    z0 = torch.zeros(n_fibres, 1, device=device)
+    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
+    # scaling factor for gradient TODO: make config param, and independent of step size
+    s = torch.randn(n_fibres, device=device) * 0.05 + 0.1  # (n_fibres,)
+    step_size = domain_size[2] / num_points
+    fibre_coords = torch.zeros(n_fibres, num_points, 3, device=device)
+    fibre_coords[:, 0, :] = coords0
+    for step in range(1, num_points):
+        prev_coords = fibre_coords[:, step-1, :]
+        # zero out z coordinate for 2D perlin noise in xy plane
+        #prev_coords_flat = torch.cat([prev_coords[:, :2], torch.zeros(n_fibres, 1, device=device)], dim=1)
+        perlin_out = curl_noise.perlin_noised(grid, prev_coords, remap_scale)
+        gradients = perlin_out[:, 1:]  # (n_fibres, 3)
+        gradx = gradients[:, 0] * s
+        grady = gradients[:, 1] * s
+        steps = torch.stack([grady, -gradx, torch.full_like(gradx, step_size)], dim=1)  # (n_fibres, 3)
+        new_coords = prev_coords + steps
+        fibre_coords[:, step, :] = new_coords
+
+    # calculate step lengths
+    diffs = fibre_coords[:, 1:, :] - fibre_coords[:, :-1, :]
+    dists = torch.norm(diffs, dim=2)  # (n_fibres, num_points-1)
+    step_lengths = dists.mean(dim=1, keepdim=True)  # (n_fibres, 1)
+    return fibre_coords, step_lengths
 
 # Stable 3D angle computation
 def angle_between(p1, p2, p3, eps=1e-8):

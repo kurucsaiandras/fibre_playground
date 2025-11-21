@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-from rve import RVE
 
 def generate_perlin_grid(shape, device='cpu', seed=0):
     """
@@ -39,6 +38,7 @@ def perlin_noised(grid, x, remap_scale=torch.tensor([1.0, 1.0, 1.0])):
     Returns:
         Tensor of shape (..., 4) - [noise, dx, dy, dz]
     """
+    remap_scale = remap_scale.to(x.device)
     # Remap coordinates
     x = x / remap_scale
     # Separate integer/fractional part
@@ -97,62 +97,68 @@ def perlin_noised(grid, x, remap_scale=torch.tensor([1.0, 1.0, 1.0])):
     
     return torch.cat([v.unsqueeze(-1), d], dim=-1)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print("Using device:", device)
-sh = 5
-shape = (sh, sh, sh)
-grid = generate_perlin_grid(shape, device=device)
-'''
-res = 200
-# generate 3D meshgrid
-eval_points = torch.meshgrid(
-    torch.linspace(0, shape[0], steps=res, device=device)[:-1],
-    torch.linspace(0, shape[1], steps=res, device=device)[:-1],
-    torch.linspace(0, shape[2], steps=res, device=device)[:-1]
-)
-eval_points = torch.stack(eval_points, dim=-1) # shape (res, res, res, 3)
-perlin_values = perlin_noised(grid, eval_points)
-perlin_slices = perlin_values[:, :, ::200//5, :].cpu().numpy() # take slices along z-axis
-for i, x in enumerate(np.linspace(0, shape[0], num=5, endpoint=False)):
-    image = perlin_slices[:, :, i, 0]  # noise values
-    plt.title(f"Perlin noise slice at x={x:.2f}")
-    plt.xlabel("y")
-    plt.ylabel("z")
-    plt.imshow(image, extent=(0, shape[0], 0, shape[1]), origin='lower', cmap='gray')
-    plt.quiver(
-        np.linspace(0, shape[0], num=res)[::5],
-        np.linspace(0, shape[1], num=res)[::5],
-        -perlin_slices[::5, ::5, i, 1],  # -dx
-        perlin_slices[::5, ::5, i, 2],  # dy
-        color='red', alpha=0.5
+def main():
+    from rve import RVE  # local import to avoid circular dependency
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Using device:", device)
+    sh = 5
+    shape = (sh, sh, sh)
+    grid = generate_perlin_grid(shape, device=device)
+    '''
+    res = 200
+    # generate 3D meshgrid
+    eval_points = torch.meshgrid(
+        torch.linspace(0, shape[0], steps=res, device=device)[:-1],
+        torch.linspace(0, shape[1], steps=res, device=device)[:-1],
+        torch.linspace(0, shape[2], steps=res, device=device)[:-1]
     )
-    plt.grid(False)
-    plt.savefig(f"perlin_slice_x_{x:.2f}.png", dpi=400)
-    plt.clf()
-'''
-# remaps the scale of the noise function in each dimension
-remap_scale = torch.tensor([1.0, 1.0, 1.0], device=device)
-n_fibres = 500
-x0 = torch.rand(n_fibres, 1, device=device) * shape[0]
-y0 = torch.rand(n_fibres, 1, device=device) * shape[1]
-z0 = torch.zeros(n_fibres, 1, device=device)
-coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
-n_steps = 200
-s = 0.01 # scaling factor for gradient
-step_size = shape[2] / n_steps
-fibre_coords = torch.zeros(n_fibres, n_steps, 3, device=device)
-fibre_coords[:, 0, :] = coords0
-for step in range(1, n_steps):
-    prev_coords = fibre_coords[:, step-1, :]
-    # zero out z coordinate for 2D perlin noise in xy plane
-    prev_coords_flat = torch.cat([prev_coords[:, :2], torch.zeros(n_fibres, 1, device=device)], dim=1)
-    perlin_out = perlin_noised(grid, prev_coords, remap_scale)
-    gradients = perlin_out[:, 1:]  # (n_fibres, 3)
-    gradx = gradients[:, 0] * s
-    grady = gradients[:, 1] * s
-    steps = torch.stack([grady, -gradx, torch.full_like(gradx, step_size)], dim=1)  # (n_fibres, 3)
-    new_coords = prev_coords + steps
-    fibre_coords[:, step, :] = new_coords
+    eval_points = torch.stack(eval_points, dim=-1) # shape (res, res, res, 3)
+    perlin_values = perlin_noised(grid, eval_points)
+    perlin_slices = perlin_values[:, :, ::200//5, :].cpu().numpy() # take slices along z-axis
+    for i, x in enumerate(np.linspace(0, shape[0], num=5, endpoint=False)):
+        image = perlin_slices[:, :, i, 0]  # noise values
+        plt.title(f"Perlin noise slice at x={x:.2f}")
+        plt.xlabel("y")
+        plt.ylabel("z")
+        plt.imshow(image, extent=(0, shape[0], 0, shape[1]), origin='lower', cmap='gray')
+        plt.quiver(
+            np.linspace(0, shape[0], num=res)[::5],
+            np.linspace(0, shape[1], num=res)[::5],
+            -perlin_slices[::5, ::5, i, 1],  # -dx
+            perlin_slices[::5, ::5, i, 2],  # dy
+            color='red', alpha=0.5
+        )
+        plt.grid(False)
+        plt.savefig(f"perlin_slice_x_{x:.2f}.png", dpi=400)
+        plt.clf()
+    '''
+    # remaps the scale of the noise function in each dimension
+    remap_scale = torch.tensor([1.0, 1.0, 2.0], device=device)
+    n_fibres = 2500
+    x0 = torch.rand(n_fibres, 1, device=device) * shape[0]
+    y0 = torch.rand(n_fibres, 1, device=device) * shape[1]
+    z0 = torch.zeros(n_fibres, 1, device=device)
+    coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
+    n_steps = 40
+    # scaling factor for gradient
+    s = torch.randn(n_fibres, device=device) * 0.025 + 0.01  # (n_fibres,)
+    step_size = shape[2] / n_steps
+    fibre_coords = torch.zeros(n_fibres, n_steps, 3, device=device)
+    fibre_coords[:, 0, :] = coords0
+    for step in range(1, n_steps):
+        prev_coords = fibre_coords[:, step-1, :]
+        # zero out z coordinate for 2D perlin noise in xy plane
+        #prev_coords_flat = torch.cat([prev_coords[:, :2], torch.zeros(n_fibres, 1, device=device)], dim=1)
+        perlin_out = perlin_noised(grid, prev_coords, remap_scale)
+        gradients = perlin_out[:, 1:]  # (n_fibres, 3)
+        gradx = gradients[:, 0] * s
+        grady = gradients[:, 1] * s
+        steps = torch.stack([grady, -gradx, torch.full_like(gradx, step_size)], dim=1)  # (n_fibres, 3)
+        new_coords = prev_coords + steps
+        fibre_coords[:, step, :] = new_coords
 
-rve = RVE.external(fibre_coords, radius=sh*0.005, downsample=False)
-rve.save("curl_init_2", 0, 0)
+    rve = RVE.external(fibre_coords, radius=sh*0.001, downsample=False)
+    rve.save("curl_noise", 0, 0)
+
+if __name__ == "__main__":
+    main()
