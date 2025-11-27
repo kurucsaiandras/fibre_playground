@@ -80,6 +80,9 @@ def perlin_noised(grid, x, remap_scale=torch.tensor([1.0, 1.0, 1.0])):
          u[...,2]*u[...,0]*(va-vb-ve+vf) +
          u[...,0]*u[...,1]*u[...,2]*(-va+vb+vc-vd+ve-vf-vg+vh))
     
+    # Normalize to [0, 1]
+    v = v * 0.5 + 0.5
+    
     # Derivative of noise
     d = (ga +
          u[...,0].unsqueeze(-1)*(gb-ga) +
@@ -103,8 +106,12 @@ def main():
     print("Using device:", device)
     sh = 5
     shape = (sh, sh, sh)
-    grid = generate_perlin_grid(shape, device=device)
-    '''
+    low_freq_grid = generate_perlin_grid(shape, device=device, seed=0)
+    sh_big = 20
+    shape_big = (sh_big, sh_big, sh_big)
+    high_freq_grid = generate_perlin_grid(shape_big, device=device, seed=1)
+    high_freq_remap = sh / sh_big
+    
     res = 200
     # generate 3D meshgrid
     eval_points = torch.meshgrid(
@@ -113,7 +120,11 @@ def main():
         torch.linspace(0, shape[2], steps=res, device=device)[:-1]
     )
     eval_points = torch.stack(eval_points, dim=-1) # shape (res, res, res, 3)
-    perlin_values = perlin_noised(grid, eval_points)
+    low_freq_p = perlin_noised(low_freq_grid, eval_points)
+    sat_strength = 15.0
+    low_freq_p = torch.sigmoid((low_freq_p - 0.5) * sat_strength)
+    high_freq_p = perlin_noised(high_freq_grid, eval_points, torch.tensor([high_freq_remap, high_freq_remap, high_freq_remap]))
+    perlin_values = low_freq_p * high_freq_p
     perlin_slices = perlin_values[:, :, ::200//5, :].cpu().numpy() # take slices along z-axis
     for i, x in enumerate(np.linspace(0, shape[0], num=5, endpoint=False)):
         image = perlin_slices[:, :, i, 0]  # noise values
@@ -159,6 +170,6 @@ def main():
 
     rve = RVE.external(fibre_coords, radius=sh*0.001, downsample=False)
     rve.save("curl_noise", 0, 0)
-
+    '''
 if __name__ == "__main__":
     main()
