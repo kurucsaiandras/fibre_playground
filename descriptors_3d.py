@@ -231,23 +231,24 @@ def eval(name, step, device, save_figs):
         plt.show()
 
     # orientation bins
-    radii = [rve.domain_size[0] * 0.1]
-    vectors, stddev = structure_bins(rve.fibre_coords, rve.domain_size, radii, border_type='cyl')
-    # absolute angle in xy plane
-    angles_xy_bins = torch.atan2(vectors[:,:,:,:,1], vectors[:,:,:,:,0]) * (180.0 / torch.pi)  # (n_radii, nx, ny, nz)
-    
-    # plot a slice of angles_xy
-    slice_idx = angles_xy_bins.shape[2] // 2
-    plt.figure(figsize=(6, 5))
-    plt.imshow(angles_xy_bins[len(radii)//2, :, :, slice_idx].cpu().numpy().T, origin='lower', cmap='hsv', vmin=-180, vmax=180)
-    plt.colorbar(label='Orientation in XY plane (degrees)')
-    plt.title('Structure Tensor Orientation Slice (Z mid-plane)')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    if save_figs:
-        plt.savefig(f"{root}/orientation_bins_slice.png", dpi=400)
-    else:
-        plt.show()
+    if False:
+        radii = [rve.domain_size[0] * 0.1]
+        vectors, stddev = structure_bins(rve.fibre_coords, rve.domain_size, radii, border_type='cyl')
+        # absolute angle in xy plane
+        angles_xy_bins = torch.atan2(vectors[:,:,:,:,1], vectors[:,:,:,:,0]) * (180.0 / torch.pi)  # (n_radii, nx, ny, nz)
+        
+        # plot a slice of angles_xy
+        slice_idx = angles_xy_bins.shape[2] // 2
+        plt.figure(figsize=(6, 5))
+        plt.imshow(angles_xy_bins[len(radii)//2, :, :, slice_idx].cpu().numpy().T, origin='lower', cmap='hsv', vmin=-180, vmax=180)
+        plt.colorbar(label='Orientation in XY plane (degrees)')
+        plt.title('Structure Tensor Orientation Slice (Z mid-plane)')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        if save_figs:
+            plt.savefig(f"{root}/orientation_bins_slice.png", dpi=400)
+        else:
+            plt.show()
 
     
     # multi-dimensional scaling plot
@@ -263,15 +264,16 @@ def eval(name, step, device, save_figs):
     else:
         plt.show()
     # also plot distances against angles
-    plt.figure(figsize=(6, 6))
-    plt.scatter(dists, angles, s=0.5, alpha=0.1)
-    plt.title("Pairwise Distances vs Angles between Fibre Segments")
-    plt.xlabel("Scaled Distance")
-    plt.ylabel("Scaled Angle")
-    if save_figs:
-        plt.savefig(f"{root}/distances_vs_angles.png", dpi=400)
-    else:
-        plt.show()
+    if False:
+        plt.figure(figsize=(6, 6))
+        plt.scatter(dists, angles, s=0.5, alpha=0.1)
+        plt.title("Pairwise Distances vs Angles between Fibre Segments")
+        plt.xlabel("Scaled Distance")
+        plt.ylabel("Scaled Angle")
+        if save_figs:
+            plt.savefig(f"{root}/distances_vs_angles.png", dpi=400)
+        else:
+            plt.show()
 
     # Vectors between consecutive points
     vecs = rve.fibre_coords[:, 1:] - rve.fibre_coords[:, :-1]  # (n_fibres, n_points-1, 3)
@@ -286,34 +288,23 @@ def eval(name, step, device, save_figs):
     angles_xy = (torch.atan2(vecs[:,:,1], vecs[:,:,0]) * 180.0 / torch.pi).cpu().numpy() # (n_fibres, n_points-1)
 
     # Plot histograms for inclination
-    fig, ax = plt.subplots(1, 3, figsize=(18, 6), constrained_layout=True)
+    fig, ax = plt.subplots(2, 2, figsize=(18, 12), constrained_layout=True)
     bins = 100
-    ax[0].hist(angles_xz, bins=bins, weights=lengths, edgecolor='black', density=True)
-    ax[0].set_xlabel(f"xz angles (degrees), mean={np.average(angles_xz, weights=lengths):.2f}, std={np.sqrt(np.cov(angles_xz, aweights=lengths)):.2f}")
-    ax[0].set_ylabel("Frequency")
-    ax[1].hist(angles_yz, bins=bins, weights=lengths, edgecolor='black', density=True)
-    ax[1].set_xlabel(f"yz angles (degrees), mean={np.average(angles_yz, weights=lengths):.2f}, std={np.sqrt(np.cov(angles_yz, aweights=lengths)):.2f}")
-    ax[1].set_ylabel("Frequency")
-    ax[2].hist(angles_3d.flatten(), bins=bins, weights=lengths, edgecolor='black', density=True)
-    ax[2].set_xlabel(f"3D angles to z (degrees), mean={np.average(angles_3d.flatten(), weights=lengths):.2f}, std={np.sqrt(np.cov(angles_3d.flatten(), aweights=lengths)):.2f}")
-    ax[2].set_ylabel("Frequency")
-    plt.suptitle(f"Fibre Inclination Angle Distributions")
+    ax[0][0].hist(angles_xz, bins=bins, weights=lengths, edgecolor='black', density=True)
+    ax[0][0].set_xlabel(f"xz angles (degrees), mean={np.average(angles_xz, weights=lengths):.2f}, std={np.sqrt(np.cov(angles_xz, aweights=lengths)):.2f}")
+    ax[0][0].set_ylabel("Frequency")
+    ax[0][1].hist(angles_yz, bins=bins, weights=lengths, edgecolor='black', density=True)
+    ax[0][1].set_xlabel(f"yz angles (degrees), mean={np.average(angles_yz, weights=lengths):.2f}, std={np.sqrt(np.cov(angles_yz, aweights=lengths)):.2f}")
+    ax[0][1].set_ylabel("Frequency")
+    ax[1][0].hist(angles_3d.flatten(), bins=bins, weights=lengths, edgecolor='black', density=True)
+    ax[1][0].set_xlabel(f"3D angles to z (degrees), mean={np.average(angles_3d.flatten(), weights=lengths):.2f}, std={np.sqrt(np.cov(angles_3d.flatten(), aweights=lengths)):.2f}")
+    ax[1][0].set_ylabel("Frequency")
+    ax[1][1].hist(angles_xy.flatten(), bins=bins, weights=lengths, edgecolor='black', density=True)
+    ax[1][1].set_xlabel(f"Orientation in xy plane (degrees), mean={np.average(angles_xy.flatten(), weights=lengths):.2f}")
+    ax[1][1].set_ylabel("Frequency")
+    plt.suptitle(f"Fibre Angle Distributions")
     if save_figs:
-        plt.savefig(f"{root}/inclination_hist.png", dpi=400)
-    else:
-        plt.show()
-    # Plot histogram for orientation in xy plane
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
-    bins = 100
-    ax[0].hist(angles_xy.flatten(), bins=bins, weights=lengths, edgecolor='black', density=True)
-    ax[0].set_xlabel(f"Orientation in xy plane (degrees), mean={np.average(angles_xy.flatten(), weights=lengths):.2f}")
-    ax[0].set_ylabel("Frequency")
-    ax[1].hist(angles_xy_bins[angles_xy_bins != 0].cpu().numpy().flatten(), bins=bins, edgecolor='black', density=True)
-    ax[1].set_xlabel(f"Average orientation per subvolumes in xy plane (degrees)")
-    ax[1].set_ylabel("Frequency")
-    plt.suptitle(f"Fibre Orientation Angle Distributions")
-    if save_figs:
-        plt.savefig(f"{root}/orientation_hist.png", dpi=400)
+        plt.savefig(f"{root}/angles_hist.png", dpi=400)
     else:
         plt.show()
 
