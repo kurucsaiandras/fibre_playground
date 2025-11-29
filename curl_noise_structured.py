@@ -116,7 +116,7 @@ def main():
     noise_waves = generate_noise_waves(100, device)
     # generate 3D meshgrid
     sh = 1
-    shape = (sh, sh, sh)
+    shape = torch.tensor([sh, sh, sh], device=device)
     res=200
     eval_points = torch.meshgrid(
         torch.linspace(0, shape[0], steps=res, device=device)[:-1],
@@ -172,7 +172,7 @@ def main():
         new_coords = prev_coords + steps
         fibre_coords[:, step, :] = new_coords
 
-    rve = RVE.external(fibre_coords, radius=sh*0.001, downsample=False)
+    rve = RVE.external(fibre_coords, radius=sh*0.001, domain_size=shape, downsample=False)
     rve.save("curl_noise_structured", 0, 0)
 
 if __name__ == "__main__":

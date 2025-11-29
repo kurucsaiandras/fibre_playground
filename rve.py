@@ -3,11 +3,11 @@ import torch.nn.functional as F
 import utils
 import math
 import os
+import mem
 
 class RVE:
     def __init__(self, config, device):
-        # set up physical parameters
-        self.phi0_curvature = math.pi
+        # set up physical constants
         self.k_length = config.spring_system.k_length
         self.k_curvature = config.spring_system.k_curvature
         self.k_boundary = config.spring_system.k_boundary
@@ -19,11 +19,11 @@ class RVE:
             self.domain_size = torch.tensor(
                 config.initialization.generate.domain_size_initial, device=device)
             if config.initialization.generate.method == 'poisson':
-                self.fibre_coords, self.l0_length = utils.generate_fibres_poisson(config, device)
+                self.fibre_coords, self.l0_length, self.phi0_curvature = utils.generate_fibres_poisson(config, device)
             elif config.initialization.generate.method == 'random':
-                self.fibre_coords, self.l0_length = utils.generate_fibres_random(config, device)
+                self.fibre_coords, self.l0_length, self.phi0_curvature = utils.generate_fibres_random(config, device)
             elif config.initialization.generate.method == 'curl':
-                self.fibre_coords, self.l0_length = utils.generate_fibres_curl(config, device)
+                self.fibre_coords, self.l0_length, self.phi0_curvature = utils.generate_fibres_curl(config, device)
             self.fibre_r, self.fibre_r_target = utils.generate_radii(self.fibre_coords.shape[0], config, device)
         elif config.initialization.method == 'load':
             self.load(config.initialization.load.name, config.initialization.load.step)
@@ -49,14 +49,17 @@ class RVE:
         return self
     
     @classmethod
-    def external(cls, fibre_coords, radius, downsample):
+    def external(cls, fibre_coords, radius, domain_size, downsample):
         """Alternative constructor for 3rd party data that only has fibre coordinates."""
         self = cls.__new__(cls)  # create instance without calling __init__
         self.fibre_coords = fibre_coords
         if downsample:
             self.fibre_coords = self.fibre_coords[:, ::20, :] # assuming apx 900 points, and we want apx 40
-        self.l0_length = 0
-        self.domain_size = torch.tensor([fibre_coords[:,:,0].max(), fibre_coords[:,:,1].max(), fibre_coords[:,:,2].max()], device=fibre_coords.device)
+        self.l0_length = self.fibre_coords[:,:-1] - self.fibre_coords[:,1:]      # (n_fibres, resolution-1, 3)
+        if domain_size is None:
+            self.domain_size = torch.tensor([fibre_coords[:,:,0].max(), fibre_coords[:,:,1].max(), fibre_coords[:,:,2].max()], device=fibre_coords.device)
+        else:
+            self.domain_size = domain_size
         self.fibre_r = torch.full((fibre_coords.shape[0],), radius, device=fibre_coords.device)
         self.fibre_r_target = self.fibre_r.clone()
         self.apply_pbc = False
@@ -67,6 +70,7 @@ class RVE:
         state = torch.load(path, map_location=self.device)
         self.fibre_coords = state['fibre_coords']
         self.l0_length = state['l0_length']
+        self.phi0_curvature = state['phi0_curvature']
         self.domain_size = state['domain_size']
         self.fibre_r = state['fibre_r']
         self.fibre_r_target = state['fibre_r_target']
@@ -76,6 +80,7 @@ class RVE:
         save_dict = {
             "fibre_coords": self.fibre_coords,
             "l0_length": self.l0_length,
+            "phi0_curvature": self.phi0_curvature,
             "time": time,
             "step": step,
             "domain_size": self.domain_size,
@@ -240,57 +245,76 @@ class RVE:
             self.fibre_coords += avg_buf
         return loss
 
-    def overlap_line_loss(self, phase):
+    def overlap_line_loss(self, phase, batch_size=100000): #50000
+        #mem.print_cuda_mem("before fun")
         boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_r)
         intersections = utils.get_bbox_intersections(boxes, self.domain_size, self.apply_pbc)
 
-        i_idx, j_idx = intersections["normal"].nonzero(as_tuple=True)
+        i_idxs, j_idxs = intersections["normal"].nonzero(as_tuple=True)
+        n_pairs = i_idxs.shape[0]
+        total_loss = 0.0
 
-        d_i = self.fibre_coords[i_idx, 1:, :] - self.fibre_coords[i_idx, :-1, :]  # (n_ij, res-1, 3)
-        d_j = self.fibre_coords[j_idx, 1:, :] - self.fibre_coords[j_idx, :-1, :]  # (n_ij, res-1, 3)
+        for start in range(0, n_pairs, batch_size):
+            end = min(start + batch_size, n_pairs)
+            i_idx = i_idxs[start:end]
+            j_idx = j_idxs[start:end]
+            d_i = self.fibre_coords[i_idx, 1:, :] - self.fibre_coords[i_idx, :-1, :]  # (n_ij, res-1, 3)
+            d_j = self.fibre_coords[j_idx, 1:, :] - self.fibre_coords[j_idx, :-1, :]  # (n_ij, res-1, 3)
 
-        a = (d_i * d_i).sum(dim=2)  # (n_ij, res-1)
-        e = (d_j * d_j).sum(dim=2)  # (n_ij, res-1)
-        b = (d_i[:, :, None, :] * d_j[:, None, :, :]).sum(dim=3)  # (n_ij, res-1, res-1)
+            a = (d_i * d_i).sum(dim=2)  # (n_ij, res-1)
+            e = (d_j * d_j).sum(dim=2)  # (n_ij, res-1)
+            b = (d_i[:, :, None, :] * d_j[:, None, :, :]).sum(dim=3)  # (n_ij, res-1, res-1)
 
-        r_ij = self.fibre_coords[i_idx, :-1, None, :] - self.fibre_coords[j_idx, None, :-1, :]  # (n_ij, res-1, res-1, 3)
-        c = (d_i[:, :, None, :] * r_ij).sum(dim=-1)  # (n_ij, res-1, res-1)
-        f = (d_j[:, :, None, :] * r_ij).sum(dim=-1)  # (n_ij, res-1, res-1)
+            r_ij = self.fibre_coords[i_idx, :-1, None, :] - self.fibre_coords[j_idx, None, :-1, :]  # (n_ij, res-1, res-1, 3)
+            c = (d_i[:, :, None, :] * r_ij).sum(dim=-1)  # (n_ij, res-1, res-1)
+            f = (d_j[:, :, None, :] * r_ij).sum(dim=-1)  # (n_ij, res-1, res-1)
 
-        denom = (a * e)[:, :, None] - b * b  # (n_ij, res-1, res-1)
-        denom_safe = denom.clone()
-        denom_safe[denom_safe.abs() < 1e-8] = 1.0  # avoid division by 0 for parallel lines
+            denom = (a * e)[:, :, None] - b * b  # (n_ij, res-1, res-1)
+            denom_safe = denom.clone()
+            denom_safe[denom_safe.abs() < 1e-8] = 1.0  # avoid division by 0 for parallel lines
 
-        # Initial s and t
-        s = torch.clamp((b * f - c * e[:, :, None]) / denom_safe, 0.0, 1.0)
-        s[denom.abs() < 1e-8] = 0.0  # parallel lines
-        t = (b * s + f) / e[:, :, None]
+            # Initial s and t
+            s = torch.clamp((b * f - c * e[:, :, None]) / denom_safe, 0.0, 1.0)
+            s[denom.abs() < 1e-8] = 0.0  # parallel lines
+            t = (b * s + f) / e[:, :, None]
 
-        # Clamp t and recompute s accordingly
-        t_lt0 = t < 0.0
-        t_gt1 = t > 1.0
-        t = torch.clamp(t, 0.0, 1.0)
+            # Clamp t and recompute s accordingly
+            t_lt0 = t < 0.0
+            t_gt1 = t > 1.0
+            t = torch.clamp(t, 0.0, 1.0)
 
-        # recompute s where t was clamped
-        s_new_lt0 = torch.clamp(-c / a[:, :, None], 0.0, 1.0)
-        s_new_gt1 = torch.clamp((b - c) / a[:, :, None], 0.0, 1.0)
-        s = torch.where(t_lt0, s_new_lt0, s)
-        s = torch.where(t_gt1, s_new_gt1, s)
+            # recompute s where t was clamped
+            s_new_lt0 = torch.clamp(-c / a[:, :, None], 0.0, 1.0)
+            s_new_gt1 = torch.clamp((b - c) / a[:, :, None], 0.0, 1.0)
+            s = torch.where(t_lt0, s_new_lt0, s)
+            s = torch.where(t_gt1, s_new_gt1, s)
 
-        p_i = self.fibre_coords[i_idx, :-1, None, :] + s[..., None] * d_i[:, :, None, :]
-        p_j = self.fibre_coords[j_idx, None, :-1, :] + t[..., None] * d_j[:, None, :, :]
+            p_i = self.fibre_coords[i_idx, :-1, None, :] + s[..., None] * d_i[:, :, None, :]
+            p_j = self.fibre_coords[j_idx, None, :-1, :] + t[..., None] * d_j[:, None, :, :]
 
-        dists = torch.linalg.norm(p_i - p_j, dim=-1)
-        expected_dists = self.fibre_r[i_idx].view(-1, 1, 1) + self.fibre_r[j_idx].view(-1, 1, 1)
+            dists = torch.linalg.norm(p_i - p_j, dim=-1)
+            expected_dists = self.fibre_r[i_idx].view(-1, 1, 1) + self.fibre_r[j_idx].view(-1, 1, 1)
 
-        # penalty
-        d_l = F.relu(expected_dists - dists)
-        if phase == 'joint':
-            penalties = 0.5 * self.k_overlap * d_l*d_l
-            loss = penalties.sum()
-        elif phase == 'overlap':
-            loss = d_l.sum()
-        return loss
+            # penalty
+            d_l = F.relu(expected_dists - dists, inplace=True)
+            if phase == 'joint':
+                penalties = 0.5 * self.k_overlap * d_l*d_l
+                batch_loss = penalties.sum()
+            elif phase == 'overlap':
+                batch_loss = d_l.sum()
+            batch_loss.backward()
+            total_loss += float(batch_loss.detach())
+            #mem.print_cuda_mem("in batch before del")
+            # free memory for this batch
+            del d_i, d_j, a, e, b, r_ij, c, f, denom, denom_safe
+            del s, t, s_new_lt0, s_new_gt1, p_i, p_j, dists, expected_dists, d_l
+            if phase == 'joint':
+                del penalties
+            torch.cuda.empty_cache()
+            #mem.print_cuda_mem("in batch after del")
+
+        #mem.print_cuda_mem("after fun")
+        return total_loss
 
     def overlap_loss(self):
         boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_r)
@@ -351,7 +375,7 @@ class RVE:
         loss = penalties.sum()
         return loss
 
-    def length_loss(self):
+    def length_loss(self, no_grad=False):
         """
         self.fibre_coords: (n_fibres, resolution, 3)
         self.k_length: scalar or (n_fibres, ) tensor
@@ -362,9 +386,11 @@ class RVE:
         d_l = dists - self.l0_length
         loss = 0.5 * self.k_length * d_l*d_l
         loss = loss.sum()
-        return loss
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach())
 
-    def curvature_loss(self):
+    def curvature_loss(self, no_grad=False):
         """
         self.fibre_coords: (n_fibres, resolution, 3)
         self.k_curvature: scalar
@@ -377,9 +403,11 @@ class RVE:
         d_l = angles - self.phi0_curvature
         loss = 0.5 * self.k_curvature * d_l*d_l
         loss = loss.sum()
-        return loss
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach())
 
-    def boundary_loss(self):
+    def boundary_loss(self, no_grad=False):
         """
         self.fibre_coords: (n_fibres, resolution, 3)
         self.fibre_r: (n_fibres,) tensor of fibre radii
@@ -406,4 +434,6 @@ class RVE:
         violations = lower_violation + upper_violation  # shape (n_fibres, resolution, 3)
         loss = 0.5 * self.k_boundary * (violations*violations).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)
         loss = loss.sum()  # sum over all points
-        return loss
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach())

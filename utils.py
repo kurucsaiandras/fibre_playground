@@ -1,7 +1,9 @@
 import torch
 import poisson_disc as pd
 import os
-import curl_noise
+import curl_noise_perlin
+import curl_noise_structured
+import math
 
 def get_bounding_boxes(points, radii):
     """
@@ -112,11 +114,11 @@ def generate_fibres_poisson(config, device):
 
     # Compute all points
     fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
-    return fibres, step_lengths
+    return fibres, step_lengths, math.pi
 
 def importance_sample(n_samples, domain_size, device):
     shape = (5, 5, 0)
-    grid = curl_noise.generate_perlin_grid(shape, device=device)
+    grid = curl_noise_perlin.generate_perlin_grid(shape, device=device)
     res = 100
     eval_points = torch.meshgrid(
         torch.linspace(0, shape[0], steps=res, device=device),
@@ -124,7 +126,7 @@ def importance_sample(n_samples, domain_size, device):
         torch.tensor([0.0], device=device)
     )
     eval_points = torch.stack(eval_points, dim=-1) # shape (res, res, 1, 3)
-    perlin_values = curl_noise.perlin_noised(grid, eval_points)
+    perlin_values = curl_noise_perlin.perlin_noised(grid, eval_points)
     perlin_values_2d = perlin_values[:, :, 0, 0]
     pdf = (perlin_values_2d - perlin_values_2d.min()).flatten()
     pdf = pdf / pdf.max()
@@ -215,47 +217,48 @@ def generate_fibres_random(config, device):
 
     # Compute all points
     fibres = coords0[:, None, :] + steps[:, None, :] * idx  # (n_fibres, num_points, 3)
-    return fibres, step_lengths
+    return fibres, step_lengths, math.pi
 
 def generate_fibres_curl(config, device):
     n_fibres = config.initialization.generate.num_of_fibres
     num_points = config.initialization.generate.resolution
-    domain_size = config.initialization.generate.domain_size_initial
-    sh = 5 # size of noise field, if mapped coords are bigger, its tiled
-    shape = (sh, sh, sh)
-    grid = curl_noise.generate_perlin_grid(shape, device=device)
+    domain_size = torch.tensor(
+        config.initialization.generate.domain_size_initial, device=device)
+    noise_waves = curl_noise_structured.generate_noise_waves(100, device)
     # remaps the scale of the noise function in each dimension
-    # we have to stretch the noise volume to be at lest domain_size
-    longest_side = max(domain_size)
-    f = longest_side / sh
-    remap_scale = torch.tensor([f, f, 2*f], device=device)
-    n_fibres = 2500
+    remap_scale = torch.tensor([1.0, 1.5, 5.0], device=device)*0.25 * domain_size
+    c = 1.0 # warp factor for the wave distortion
     x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
     y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
     z0 = torch.zeros(n_fibres, 1, device=device)
     coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
     # scaling factor for gradient TODO: make config param, and independent of step size
-    s = torch.randn(n_fibres, device=device) * 0.05 + 0.1  # (n_fibres,)
-    step_size = domain_size[2] / num_points
+    step_size_in_plane = 0.00025
+    # scaling factor for gradient
+    s = torch.randn(n_fibres, device=device) * step_size_in_plane * 0.5 + step_size_in_plane  # (n_fibres,)
+    step_size_vertical = domain_size[2] / num_points
     fibre_coords = torch.zeros(n_fibres, num_points, 3, device=device)
     fibre_coords[:, 0, :] = coords0
     for step in range(1, num_points):
         prev_coords = fibre_coords[:, step-1, :]
-        # zero out z coordinate for 2D perlin noise in xy plane
-        #prev_coords_flat = torch.cat([prev_coords[:, :2], torch.zeros(n_fibres, 1, device=device)], dim=1)
-        perlin_out = curl_noise.perlin_noised(grid, prev_coords, remap_scale)
-        gradients = perlin_out[:, 1:]  # (n_fibres, 3)
-        gradx = gradients[:, 0] * s
-        grady = gradients[:, 1] * s
-        steps = torch.stack([grady, -gradx, torch.full_like(gradx, step_size)], dim=1)  # (n_fibres, 3)
+        noise = curl_noise_structured.eval_with_derivatives(noise_waves, prev_coords, remap_scale, c)
+        gradients = noise[:, 1:]  # (n_fibres, 3)
+        #norm = torch.norm(gradients[:, :2], dim=1) + 1e-8
+        gradx = gradients[:, 0] * -s #/ norm
+        grady = gradients[:, 1] * -s #/ norm
+
+        steps = torch.stack([grady, -gradx, torch.full_like(gradx, step_size_vertical)], dim=1)  # (n_fibres, 3)
         new_coords = prev_coords + steps
         fibre_coords[:, step, :] = new_coords
 
-    # calculate step lengths
+    # calculate segment lengths
     diffs = fibre_coords[:, 1:, :] - fibre_coords[:, :-1, :]
-    dists = torch.norm(diffs, dim=2)  # (n_fibres, num_points-1)
-    step_lengths = dists.mean(dim=1, keepdim=True)  # (n_fibres, 1)
-    return fibre_coords, step_lengths
+    segment_lengths = torch.norm(diffs, dim=2)  # (n_fibres, num_points-1)
+    p1 = fibre_coords[:,:-2]       # (n_fibres, resolution-2, 3)
+    p2 = fibre_coords[:,1:-1]
+    p3 = fibre_coords[:,2:]
+    phi0_curvature = angle_between(p1, p2, p3)  # (n_fibres, resolution-2)
+    return fibre_coords, segment_lengths, phi0_curvature
 
 # Stable 3D angle computation
 def angle_between(p1, p2, p3, eps=1e-8):

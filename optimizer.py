@@ -36,13 +36,17 @@ class Optimizer:
             self.overlap = torch.optim.SGD([self.rve.fibre_coords], lr=1e-3)
 
     def loss(self):
+        self.current.zero_grad() # zero the grads here as we backprop immediately
+        # set flag for the other losses to not backprop if in overlap phase
+        if self.phase == 'overlap': no_grad = True
+        else: no_grad = False
         if self.config.line_loss:
             self.losses["overlap"] = self.rve.overlap_line_loss(self.phase)
         else:
             self.losses["overlap"] = self.rve.overlap_loss()
-        self.losses["boundary"] = self.rve.boundary_loss()
-        self.losses["length"] = self.rve.length_loss()
-        self.losses["curvature"] = self.rve.curvature_loss()
+        self.losses["boundary"] = self.rve.boundary_loss(no_grad)
+        self.losses["length"] = self.rve.length_loss(no_grad)
+        self.losses["curvature"] = self.rve.curvature_loss(no_grad)
         if self.phase == 'joint': self.loss_sum = sum(self.losses.values())
         elif self.phase == 'overlap': self.loss_sum = self.losses["overlap"]
 
@@ -111,13 +115,12 @@ class Optimizer:
         return loss_sum
 
     def step(self):
-        if not torch.isfinite(self.loss_sum):
-            raise Exception("Non-finite loss in closure -> aborting")
+        # assuming gradients are already backpropagated
+        #if not torch.isfinite(self.loss_sum):
+        #    raise Exception("Non-finite loss in closure -> aborting")
         if self.phase == 'joint' and self.config.joint_optimizer == 'lbfgs':
             self.current.step(self.lbfgs_closure)
         else:
-            self.current.zero_grad()
-            self.loss_sum.backward()
             if self.config.grad_clipping:
                 torch.nn.utils.clip_grad_norm_([self.rve.fibre_coords],
                                             self.config.max_grad_norm)
