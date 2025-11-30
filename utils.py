@@ -16,6 +16,36 @@ def get_bounding_boxes(points, radii):
     boxes = torch.stack([min_coords.min(dim=1).values, max_coords.max(dim=1).values], dim=1)
     return boxes
 
+def get_pbc_offsets(domain_size, device):
+    """
+    Calculates the offsets by which bboxes have to be shifted to get the correct pbc distances
+    Naming has to align with `get_bbox_intersections()`
+    """
+    offsets = {
+        "normal": {
+            "i": torch.tensor([0.0, 0.0, 0.0], device=device),
+            "j": torch.tensor([0.0, 0.0, 0.0], device=device),
+        },
+        "x_pbc": {
+            "i": torch.tensor([domain_size[0], 0.0, 0.0], device=device),
+            "j": torch.tensor([0.0, 0.0, 0.0], device=device),
+        },
+        "y_pbc": {
+            "i": torch.tensor([0.0, domain_size[1], 0.0], device=device),
+            "j": torch.tensor([0.0, 0.0, 0.0], device=device),
+        },
+        "xy_pbc": {
+            "i": torch.tensor([domain_size[0], domain_size[1], 0.0], device=device),
+            "j": torch.tensor([0.0, 0.0, 0.0], device=device),
+        },
+        "yx_pbc": {
+            "i": torch.tensor([domain_size[0], 0.0, 0.0], device=device),
+            "j": torch.tensor([0.0, domain_size[1], 0.0], device=device),
+        },
+    }
+
+    return offsets
+
 def get_bbox_intersections(boxes, domain_size, apply_pbc):
     """
     boxes: (n_fibres, 2, 3) tensor of bounding boxes: p_min, p_max
@@ -186,11 +216,10 @@ def generate_fibres_random(config, device):
     dx = torch.randn(n_fibres, 1, device=device) * std_angle
     dy = torch.randn(n_fibres, 1, device=device) * std_angle
     dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
-    x_ = domain_size[0]
+    #x_ = domain_size[0]
     #tilted_bundles = (0.1*x_ < x0) & (x0 < 0.15*x_) | (0.6*x_ < x0) & (x0 < 0.62*x_)
-    tilted_bundles = ((x0 / x_) % 0.04) < 0.02
-    dy = torch.where(tilted_bundles, dy+0.5, dy)
-    y0 = torch.where(tilted_bundles, y0-0.25*domain_size[1], y0)
+    #dy = torch.where(tilted_bundles, dy+0.5, dy)
+    #y0 = torch.where(tilted_bundles, y0-0.25*domain_size[1], y0)
     dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
     dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
     coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
