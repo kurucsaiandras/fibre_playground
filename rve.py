@@ -326,46 +326,26 @@ class RVE:
         boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_r)
         intersections = utils.get_bbox_intersections(boxes, self.domain_size, self.apply_pbc)
 
-        i_idx, j_idx = intersections["normal"].nonzero(as_tuple=True)
-        dists = torch.norm(self.fibre_coords[i_idx, :, None, :] - self.fibre_coords[j_idx, None, :, :], dim=-1) # (n_ij, res, res)
-        expected_dists = self.fibre_r[i_idx].view(-1,1,1) + self.fibre_r[j_idx].view(-1,1,1)
-
+        offs = utils.get_pbc_offsets(self.domain_size, self.device)
+        cases = ["normal"]
         if self.apply_pbc:
-            # pbc x
-            i_idx_x, j_idx_x = intersections["x_pbc"].nonzero(as_tuple=True)
-            dists_x = torch.norm((self.fibre_coords[i_idx_x, :, None, :] -
-                                torch.tensor([self.domain_size[0],0,0], device=self.device)) -
-                                self.fibre_coords[j_idx_x, None, :, :], dim=-1)
-            expected_dists_x = self.fibre_r[i_idx_x].view(-1,1,1) + self.fibre_r[j_idx_x].view(-1,1,1)
-            # pbc y
-            i_idx_y, j_idx_y = intersections["y_pbc"].nonzero(as_tuple=True)
-            dists_y = torch.norm((self.fibre_coords[i_idx_y, :, None, :] -
-                                torch.tensor([0,self.domain_size[1],0], device=self.device)) -
-                                self.fibre_coords[j_idx_y, None, :, :], dim=-1)
-            expected_dists_y = self.fibre_r[i_idx_y].view(-1,1,1) + self.fibre_r[j_idx_y].view(-1,1,1)
-            # pbc xy
-            i_idx_xy, j_idx_xy = intersections["xy_pbc"].nonzero(as_tuple=True)
-            dists_xy = torch.norm((self.fibre_coords[i_idx_xy, :, None, :] -
-                                torch.tensor([self.domain_size[0],self.domain_size[1],0], device=self.device)) -
-                                self.fibre_coords[j_idx_xy, None, :, :], dim=-1)
-            expected_dists_xy = self.fibre_r[i_idx_xy].view(-1,1,1) + self.fibre_r[j_idx_xy].view(-1,1,1)
-            # pbc yx
-            i_idx_yx, j_idx_yx = intersections["yx_pbc"].nonzero(as_tuple=True)
-            dists_yx = torch.norm((self.fibre_coords[i_idx_yx, :, None, :] -
-                                torch.tensor([self.domain_size[0],0,0], device=self.device)) -
-                                (self.fibre_coords[j_idx_yx, None, :, :] -
-                                torch.tensor([0,self.domain_size[1],0], device=self.device)), dim=-1)
-            expected_dists_yx = self.fibre_r[i_idx_yx].view(-1,1,1) + self.fibre_r[j_idx_yx].view(-1,1,1)
-            # concatenate all distances
-            dists = torch.cat([dists, dists_x, dists_y, dists_xy, dists_yx], dim=0)
-            expected_dists = torch.cat([expected_dists, expected_dists_x, expected_dists_y, expected_dists_xy, expected_dists_yx], dim=0)
+            cases = ["normal", "x_pbc", "y_pbc", "xy_pbc", "yx_pbc"]
+        total_loss = 0.0
 
-        # penalty
-        d_l = F.relu(expected_dists - dists)
-        penalties = 0.5 * self.k_overlap * d_l*d_l
+        for case in cases:
+            i_idx, j_idx = intersections[case].nonzero(as_tuple=True)
+            dists = torch.norm((self.fibre_coords[i_idx, :, None, :]-offs[case]['i'])
+                                -(self.fibre_coords[j_idx, None, :, :]-offs[case]['j']), dim=-1)
+            expected_dists = self.fibre_r[i_idx].view(-1,1,1) + self.fibre_r[j_idx].view(-1,1,1)
 
-        loss = penalties.sum()
-        return loss
+            # penalty
+            d_l = F.relu(expected_dists - dists, inplace=True)
+            
+            penalties = 0.5 * self.k_overlap * d_l*d_l
+            case_loss = penalties.sum()
+            case_loss.backward()
+            total_loss += float(case_loss.detach())
+        return total_loss
 
     def overlap_loss_inf_wall(self, alpha):
         boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_diameter*0.5)
