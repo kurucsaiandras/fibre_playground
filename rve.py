@@ -347,20 +347,6 @@ class RVE:
             total_loss += float(case_loss.detach())
         return total_loss
 
-    def overlap_loss_inf_wall(self, alpha):
-        boxes = utils.get_bounding_boxes(self.fibre_coords, self.fibre_diameter*0.5)
-        intersections = utils.get_bbox_intersections(boxes)
-
-        i_idx, j_idx = intersections.nonzero(as_tuple=True)
-
-        dists = torch.norm(self.fibre_coords[i_idx, :, None, :] - self.fibre_coords[j_idx, None, :, :], dim=-1)
-
-        # infinite wall penalty
-        penalties = torch.clamp(-alpha * torch.log(dists / self.fibre_diameter), min=0.0)
-
-        loss = penalties.sum()
-        return loss
-
     def length_loss(self, no_grad=False):
         """
         self.fibre_coords: (n_fibres, resolution, 3)
@@ -370,6 +356,15 @@ class RVE:
         diffs = self.fibre_coords[:,:-1] - self.fibre_coords[:,1:]      # (n_fibres, resolution-1, 3)
         dists = torch.norm(diffs, dim=2)    # (n_fibres, resolution-1)
         d_l = dists - self.l0_length
+        loss = 0.5 * self.k_length * d_l*d_l
+        loss = loss.sum()
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach())
+    
+    def equal_segments_loss(self, no_grad=False):
+        segment_lengths = (self.fibre_coords[:,:-1] - self.fibre_coords[:,1:]).norm(dim=2)  # (n_fibres, resolution-1)
+        d_l = segment_lengths - segment_lengths.mean(dim=-1)
         loss = 0.5 * self.k_length * d_l*d_l
         loss = loss.sum()
         if not no_grad:
@@ -419,6 +414,16 @@ class RVE:
         # total violation per coordinate
         violations = lower_violation + upper_violation  # shape (n_fibres, resolution, 3)
         loss = 0.5 * self.k_boundary * (violations*violations).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)
+        loss = loss.sum()  # sum over all points
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach())
+    
+    def snap_z_to_surface_loss(self, no_grad=False):
+        lower_violation = torch.clamp(self.fibre_coords[:, 0, 2], min=0.0) # violate if z > 0
+        upper_violation = torch.clamp(self.fibre_coords[:, -1, 2], max=self.domain_size[2]) # violate if z < domain_size
+        violations = lower_violation + upper_violation  # shape (n_fibres,)
+        loss = 0.5 * self.k_boundary * (violations*violations).sum()
         loss = loss.sum()  # sum over all points
         if not no_grad:
             loss.backward()

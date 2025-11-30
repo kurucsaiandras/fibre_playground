@@ -45,7 +45,11 @@ class Optimizer:
         else:
             self.losses["overlap"] = self.rve.overlap_loss()
         self.losses["boundary"] = self.rve.boundary_loss(no_grad)
-        self.losses["length"] = self.rve.length_loss(no_grad)
+        if self.config.free_length:
+            self.losses["length"] = self.rve.equal_segments_loss(no_grad)
+            self.losses["boundary"] += self.rve.snap_z_to_surface_loss(no_grad)
+        else:
+            self.losses["length"] = self.rve.length_loss(no_grad)
         self.losses["curvature"] = self.rve.curvature_loss(no_grad)
         if self.phase == 'joint': self.loss_sum = sum(self.losses.values())
         elif self.phase == 'overlap': self.loss_sum = self.losses["overlap"]
