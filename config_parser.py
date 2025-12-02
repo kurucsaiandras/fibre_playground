@@ -45,6 +45,7 @@ class EvolutionConfig:
     domain_size_steps: float
     overlap_threshold: float
     apply_pbc: bool
+    keep_edge_angles_num: int
 
 @dataclass
 class OptimizationConfig:
@@ -53,6 +54,7 @@ class OptimizationConfig:
     grad_clipping: bool
     max_grad_norm: float
     line_loss: bool
+    free_length: bool
     alternate_phases: bool
     overlap_optimizer: str
     max_iter_per_phase: int

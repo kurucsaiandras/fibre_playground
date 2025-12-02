@@ -27,6 +27,7 @@ evolution:
   domain_size_steps: 30
   overlap_threshold: 0
   apply_pbc: False
+  keep_edge_angles_num: 100
 
 optimization:
   joint_optimizer: adam # adam or lbfgs
@@ -35,6 +36,7 @@ optimization:
   max_grad_norm: 1.0
   # line loss converges better with alternating phases
   line_loss: True
+  free_length: True
   alternate_phases: True
   overlap_optimizer: sgd # sgd or own
   max_iter_per_phase: 2000 # for the joint loss optimization

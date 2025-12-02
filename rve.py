@@ -38,6 +38,14 @@ class RVE:
         # calculate domain size step
         self.domain_size_target = torch.tensor(config.evolution.domain_size_target, device=device)
         self.domain_size_incr = (self.domain_size_target - self.domain_size) / config.evolution.domain_size_steps
+        keep_edge_angles_num = config.evolution.keep_edge_angles_num
+        self.keep_edge_idx = None
+        if keep_edge_angles_num != 0:
+            self.keep_edge_idx = torch.randperm(self.fibre_coords.shape[0])[:keep_edge_angles_num]
+            # top tangents pointing outwards (up)
+            self.edge_tangents_top = (self.fibre_coords[self.keep_edge_idx, -1, :] - self.fibre_coords[self.keep_edge_idx, -2, :]).detach()
+            # bottom tangents pointing outwards (down)
+            self.edge_tangents_bot = (self.fibre_coords[self.keep_edge_idx, 0, :] - self.fibre_coords[self.keep_edge_idx, 1, :]).detach()
         
     @classmethod
     def eval(cls, name, step, device):
@@ -364,7 +372,7 @@ class RVE:
     
     def equal_segments_loss(self, no_grad=False):
         segment_lengths = (self.fibre_coords[:,:-1] - self.fibre_coords[:,1:]).norm(dim=2)  # (n_fibres, resolution-1)
-        d_l = segment_lengths - segment_lengths.mean(dim=-1)
+        d_l = segment_lengths - segment_lengths.mean(dim=-1, keepdim=True)
         loss = 0.5 * self.k_length * d_l*d_l
         loss = loss.sum()
         if not no_grad:
@@ -377,12 +385,30 @@ class RVE:
         self.k_curvature: scalar
         self.phi0_curvature: scalar
         """
-        p1 = self.fibre_coords[:,:-2]       # (n_fibres, resolution-2, 3)
-        p2 = self.fibre_coords[:,1:-1]
-        p3 = self.fibre_coords[:,2:]
-        angles = utils.angle_between(p1, p2, p3)  # (n_fibres, resolution-2)
+        v1 = self.fibre_coords[:,:-2] - self.fibre_coords[:,1:-1]      # (n_fibres, resolution-2, 3)
+        v2 = self.fibre_coords[:,2:] - self.fibre_coords[:,1:-1]
+        angles = utils.angle_between(v1, v2)  # (n_fibres, resolution-2)
         d_l = angles - self.phi0_curvature
         loss = 0.5 * self.k_curvature * d_l*d_l
+        loss = loss.sum()
+        if not no_grad:
+            loss.backward()
+        return float(loss.detach()) + self.edge_tangent_loss(no_grad)
+    
+    def edge_tangent_loss(self, no_grad=False):
+        if self.keep_edge_idx is None:
+            return 0.0
+        # top tangents pointing outwards (up)
+        v_top = self.fibre_coords[self.keep_edge_idx, -1, :] - self.fibre_coords[self.keep_edge_idx, -2, :]
+        # bottom tangents pointing outwards (down)
+        v_bot = self.fibre_coords[self.keep_edge_idx, 0, :] - self.fibre_coords[self.keep_edge_idx, 1, :]
+
+        # Compute angles
+        d_l_edge_top = utils.angle_between(v_top, self.edge_tangents_top)
+        d_l_edge_bot = utils.angle_between(v_bot, self.edge_tangents_bot)
+        d_l_edge = torch.cat([d_l_edge_bot, d_l_edge_top])
+
+        loss = 0.5 * self.k_curvature * d_l_edge * d_l_edge
         loss = loss.sum()
         if not no_grad:
             loss.backward()
@@ -421,7 +447,7 @@ class RVE:
     
     def snap_z_to_surface_loss(self, no_grad=False):
         lower_violation = torch.clamp(self.fibre_coords[:, 0, 2], min=0.0) # violate if z > 0
-        upper_violation = torch.clamp(self.fibre_coords[:, -1, 2], max=self.domain_size[2]) # violate if z < domain_size
+        upper_violation = torch.clamp(self.domain_size[2]-self.fibre_coords[:, -1, 2], min=0.0) # violate if z < domain_size
         violations = lower_violation + upper_violation  # shape (n_fibres,)
         loss = 0.5 * self.k_boundary * (violations*violations).sum()
         loss = loss.sum()  # sum over all points

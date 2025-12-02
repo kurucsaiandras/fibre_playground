@@ -286,14 +286,11 @@ def generate_fibres_curl(config, device):
     p1 = fibre_coords[:,:-2]       # (n_fibres, resolution-2, 3)
     p2 = fibre_coords[:,1:-1]
     p3 = fibre_coords[:,2:]
-    phi0_curvature = angle_between(p1, p2, p3)  # (n_fibres, resolution-2)
+    phi0_curvature = angle_between(p1-p2, p3-p2)  # (n_fibres, resolution-2)
     return fibre_coords, segment_lengths, phi0_curvature
 
 # Stable 3D angle computation
-def angle_between(p1, p2, p3, eps=1e-8):
-    # vectors v1 = p1 - p2, v2 = p3 - p2
-    v1 = p1 - p2
-    v2 = p3 - p2
+def angle_between(v1, v2, eps=1e-8):
     # 3D cross product scalar
     cross = torch.cross(v1, v2, dim=-1)  # (..., 3)
     cross_norm = torch.norm(cross, dim=-1)  # (...)
