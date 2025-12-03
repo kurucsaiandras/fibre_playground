@@ -129,15 +129,15 @@ def main():
     if False:
         modified_wave = eval_with_derivatives(noise_waves, eval_points, remap_scale, c)
         slices = modified_wave[:, :, ::res//5, :].cpu().numpy() # take slices along z-axis
-        for i, z in enumerate(np.linspace(0, shape[0], num=5, endpoint=False)):
+        for i, z in enumerate(np.linspace(0, shape[0].cpu(), num=5, endpoint=False)):
             image = slices[:, :, i, 0]  # noise values
             plt.title(f"Wave noise slice at z={z:.2f}")
             plt.xlabel("x")
             plt.ylabel("y")
-            plt.imshow(image.T, extent=(0, shape[0], 0, shape[1]), origin='lower', cmap='gray')
+            plt.imshow(image.T, extent=(0, shape[0].cpu(), 0, shape[1].cpu()), origin='lower', cmap='gray')
             plt.quiver(
-                np.linspace(0, shape[0], num=res)[::5],
-                np.linspace(0, shape[1], num=res)[::5],
+                np.linspace(0, shape[0].cpu(), num=res)[::5],
+                np.linspace(0, shape[1].cpu(), num=res)[::5],
                 slices[::5, ::5, i, 2].T,  # dy
                 -slices[::5, ::5, i, 1].T,  # -dx
                 color='red', alpha=0.5

@@ -278,6 +278,7 @@ class RVE:
                 a = (d_i * d_i).sum(dim=2)  # (n_ij, res-1)
                 e = (d_j * d_j).sum(dim=2)  # (n_ij, res-1)
                 b = (d_i[:, :, None, :] * d_j[:, None, :, :]).sum(dim=3)  # (n_ij, res-1, res-1)
+                avg_length = (torch.sqrt(a[:, None, :]) + torch.sqrt(e[:, :, None])) * 0.5
 
                 r_ij = (self.fibre_coords[i_idx, :-1, None, :]-offs[case]['i']) - (self.fibre_coords[j_idx, None, :-1, :]-offs[case]['j'])  # (n_ij, res-1, res-1, 3)
                 c = (d_i[:, :, None, :] * r_ij).sum(dim=-1)  # (n_ij, res-1, res-1)
@@ -312,7 +313,7 @@ class RVE:
                 # penalty
                 d_l = F.relu(expected_dists - dists, inplace=True)
                 if phase == 'joint':
-                    penalties = 0.5 * self.k_overlap * d_l*d_l
+                    penalties = 0.5 * self.k_overlap * d_l*d_l  / avg_length.detach()
                     batch_loss = penalties.sum()
                 elif phase == 'overlap':
                     batch_loss = d_l.sum()
@@ -373,7 +374,7 @@ class RVE:
     def equal_segments_loss(self, no_grad=False):
         segment_lengths = (self.fibre_coords[:,:-1] - self.fibre_coords[:,1:]).norm(dim=2)  # (n_fibres, resolution-1)
         d_l = segment_lengths - segment_lengths.mean(dim=-1, keepdim=True)
-        loss = 0.5 * self.k_length * d_l*d_l
+        loss = 0.5 * self.k_length * d_l*d_l / segment_lengths.detach()
         loss = loss.sum()
         if not no_grad:
             loss.backward()
@@ -387,9 +388,10 @@ class RVE:
         """
         v1 = self.fibre_coords[:,:-2] - self.fibre_coords[:,1:-1]      # (n_fibres, resolution-2, 3)
         v2 = self.fibre_coords[:,2:] - self.fibre_coords[:,1:-1]
+        avg_length = (v1.norm(dim=-1) + v2.norm(dim=-1)) * 0.5  # (n_fibres, resolution-2)
         angles = utils.angle_between(v1, v2)  # (n_fibres, resolution-2)
         d_l = angles - self.phi0_curvature
-        loss = 0.5 * self.k_curvature * d_l*d_l
+        loss = 0.5 * self.k_curvature * d_l*d_l * avg_length.detach() / self.domain_size[2] # Normalize by segment_length/full_height
         loss = loss.sum()
         if not no_grad:
             loss.backward()
@@ -407,8 +409,9 @@ class RVE:
         d_l_edge_top = utils.angle_between(v_top, self.edge_tangents_top)
         d_l_edge_bot = utils.angle_between(v_bot, self.edge_tangents_bot)
         d_l_edge = torch.cat([d_l_edge_bot, d_l_edge_top])
-
-        loss = 0.5 * self.k_curvature * d_l_edge * d_l_edge
+        segment_length = torch.cat([v_bot.norm(dim=-1), v_top.norm(dim=-1)]).detach()
+        # Normalize by segment_length/full_height
+        loss = 0.5 * self.k_curvature * d_l_edge * d_l_edge * segment_length / self.domain_size[2]
         loss = loss.sum()
         if not no_grad:
             loss.backward()
@@ -439,7 +442,7 @@ class RVE:
             upper_violation = torch.clamp(self.fibre_coords - (self.domain_size - fibre_r_offset), min=0.0)
         # total violation per coordinate
         violations = lower_violation + upper_violation  # shape (n_fibres, resolution, 3)
-        loss = 0.5 * self.k_boundary * (violations*violations).sum(dim=2)  # sum over x,y,z -> shape (n_fibres, resolution)
+        loss = 0.5 * self.k_boundary * (violations*violations).sum(dim=2) / self.domain_size[2]  # sum over x,y,z -> shape (n_fibres, resolution)
         loss = loss.sum()  # sum over all points
         if not no_grad:
             loss.backward()
@@ -449,7 +452,7 @@ class RVE:
         lower_violation = torch.clamp(self.fibre_coords[:, 0, 2], min=0.0) # violate if z > 0
         upper_violation = torch.clamp(self.domain_size[2]-self.fibre_coords[:, -1, 2], min=0.0) # violate if z < domain_size
         violations = lower_violation + upper_violation  # shape (n_fibres,)
-        loss = 0.5 * self.k_boundary * (violations*violations).sum()
+        loss = 0.5 * self.k_boundary * (violations*violations).sum() / self.domain_size[2]
         loss = loss.sum()  # sum over all points
         if not no_grad:
             loss.backward()

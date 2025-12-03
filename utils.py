@@ -200,9 +200,9 @@ def generate_fibres_random(config, device):
     std_angle = config.initialization.generate.angle_std_dev
     domain_size = config.initialization.generate.domain_size_initial
     # Random starting coordinates at z=0
-    x0, y0 = importance_sample(n_fibres, domain_size, device)
-    #x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
-    #y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
+    #x0, y0 = importance_sample(n_fibres, domain_size, device)
+    x0 = torch.rand(n_fibres, 1, device=device) * domain_size[0]
+    y0 = torch.rand(n_fibres, 1, device=device) * domain_size[1]
     z0 = torch.zeros(n_fibres, 1, device=device)
 
     # Base direction (0, 0, 1) with Gaussian perturbations in x/y
@@ -213,26 +213,26 @@ def generate_fibres_random(config, device):
     # resembles the distrib. in converged stages. (although using this
     # method also converges to the same results)
     
-    dx = torch.randn(n_fibres, 1, device=device) * std_angle
-    dy = torch.randn(n_fibres, 1, device=device) * std_angle
-    dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
+    #dx = torch.randn(n_fibres, 1, device=device) * std_angle
+    #dy = torch.randn(n_fibres, 1, device=device) * std_angle
+    #dz = torch.ones(n_fibres, 1, device=device)  # mostly upward
     #x_ = domain_size[0]
     #tilted_bundles = (0.1*x_ < x0) & (x0 < 0.15*x_) | (0.6*x_ < x0) & (x0 < 0.62*x_)
     #dy = torch.where(tilted_bundles, dy+0.5, dy)
     #y0 = torch.where(tilted_bundles, y0-0.25*domain_size[1], y0)
-    dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
-    dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
+    #dirs = torch.cat([dx, dy, dz], dim=1)  # (n_fibres, 3)
+    #dirs = dirs / torch.norm(dirs, dim=1, keepdim=True)  # normalize
     coords0 = torch.cat([x0, y0, z0], dim=1)  # (n_fibres, 3)
 
     # Draw inclination angle from normal distribution (angle with z axis)
-    #thetas = torch.randn(n_fibres, device=device) * std_angle
+    thetas = torch.randn(n_fibres, device=device) * std_angle
     # Draw azimuthal angle from uniform distribution (rotate around z axis)
-    #phis = torch.rand(n_fibres, device=device) * torch.pi # only until pi as theta can be negative
+    phis = torch.rand(n_fibres, device=device) * torch.pi # only until pi as theta can be negative
     # Calculate coordinates of direction vectors
-    #dx = torch.sin(thetas) * torch.cos(phis)
-    #dy = torch.sin(thetas) * torch.sin(phis)
-    #dz = torch.cos(thetas)
-    #dirs = torch.stack([dx, dy, dz], dim=1)  # (n_fibres, 3) already normalized
+    dx = torch.sin(thetas) * torch.cos(phis)
+    dy = torch.sin(thetas) * torch.sin(phis)
+    dz = torch.cos(thetas)
+    dirs = torch.stack([dx, dy, dz], dim=1)  # (n_fibres, 3) already normalized
 
     # Calculate lengths until they hit the top (z = domain_size)
     lengths = (domain_size[2] - z0) / dirs[:, 2:3]  # (n_fibres, 1)
